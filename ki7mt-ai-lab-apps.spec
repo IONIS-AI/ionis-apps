@@ -22,7 +22,9 @@ BuildRequires:  git
 BuildRequires:  make
 
 # Runtime requirements
-Requires:       ki7mt-ai-lab-core >= 1.1.0
+Requires:       ki7mt-ai-lab-core >= 2.0.0
+Requires:       %{name}-wspr = %{version}-%{release}
+Requires:       %{name}-solar = %{version}-%{release}
 
 %description
 High-performance Go applications for KI7MT AI Lab WSPR (Weak Signal
