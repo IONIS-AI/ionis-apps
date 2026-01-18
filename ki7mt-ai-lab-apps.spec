@@ -11,7 +11,7 @@ Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
 License:        GPL-3.0-or-later
 URL:            https://github.com/KI7MT/ki7mt-ai-lab-apps
-Source0:        %{name}-%{version}.tar.gz
+Source0:        https://github.com/KI7MT/%{name}/archive/refs/tags/v%{version}.tar.gz#/%{name}-%{version}.tar.gz
 
 # Architecture-specific (Go compiles to native binaries)
 ExclusiveArch:  x86_64 aarch64
@@ -58,7 +58,7 @@ Solar flux data processing applications:
 - solar-ingest: NOAA solar indices ingestion into ClickHouse
 
 %prep
-%autosetup -n %{name}-%{version}
+%autosetup -n %{name}-v%{version}
 
 %build
 make all VERSION=%{version}
@@ -83,7 +83,7 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/solar-download
 
 %changelog
-* Sat Jan 18 2026 Greg Beam <ki7mt@outlook.com> - 2.0.0-1
+* Sun Jan 18 2026 Greg Beam <ki7mt@outlook.com> - 2.0.0-1
 - Major release with high-performance ingestion tools
 - Add wspr-shredder: 14.4 Mrps uncompressed CSV ingester
 - Add wspr-turbo: 8.8 Mrps streaming .gz ingester with klauspost/gzip
@@ -92,7 +92,7 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 - Remove CUDA/GPU dependencies (CPU-only, static binaries)
 - Update to Go 1.24
 
-* Fri Jan 17 2026 Greg Beam <ki7mt@outlook.com> - 1.0.0-1
+* Sat Jan 17 2026 Greg Beam <ki7mt@outlook.com> - 1.0.0-1
 - Initial package release
 - Add wspr-ingest: CSV ingestion with dual-path (GPU/CPU)
 - Add wspr-download: Parallel WSPR archive downloader
