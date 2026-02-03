@@ -40,7 +40,7 @@ import (
 )
 
 // Version can be overridden at build time via -ldflags
-var Version = "2.0.0"
+var Version = "2.0.4"
 
 const (
 	BlockSize     = 1_000_000 // 1M rows per block

@@ -19,7 +19,7 @@ import (
 )
 
 // Version can be overridden at build time via -ldflags
-var Version = "2.0.0"
+var Version = "2.0.4"
 
 // DataSource defines a solar data source
 type DataSource struct {
