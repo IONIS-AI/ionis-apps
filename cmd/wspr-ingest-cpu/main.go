@@ -31,10 +31,11 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/KI7MT/ki7mt-ai-lab-apps/internal/bands"
 )
 
 // Version is set at build time
-var Version = "cpu-1.0.0"
+var Version = "cpu-1.1.0"
 
 // =============================================================================
 // Configuration
@@ -251,12 +252,8 @@ func parseRow(fields []string, spot *Spot, rowNum int64) error {
 	}
 	spot.Azimuth = uint16(az)
 
-	// Band
-	band, err := strconv.ParseInt(fields[12], 10, 32)
-	if err != nil {
-		return fmt.Errorf("row %d: invalid band: %v", rowNum, err)
-	}
-	spot.Band = int32(band)
+	// Band — normalize from frequency (ignore CSV band column)
+	spot.Band, _ = bands.GetBand(freqFloat)
 
 	// Version (field 13)
 	copyFixedString(spot.Version[:], fields[13])

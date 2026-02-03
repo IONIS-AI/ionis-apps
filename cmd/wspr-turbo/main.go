@@ -37,10 +37,11 @@ import (
 
 	"github.com/ClickHouse/ch-go"
 	"github.com/ClickHouse/ch-go/proto"
+	"github.com/KI7MT/ki7mt-ai-lab-apps/internal/bands"
 )
 
 // Version can be overridden at build time via -ldflags
-var Version = "2.0.8"
+var Version = "2.1.0"
 
 const (
 	BlockSize     = 1_000_000 // 1M rows per block
@@ -270,7 +271,6 @@ func (s *VectorizedScanner) parseLineIntoBlock(block *ColumnBlock, line []byte) 
 		drift        int64
 		distance     uint64
 		azimuth      uint64
-		band         int64
 		version      string
 		code         uint64
 	)
@@ -304,8 +304,7 @@ func (s *VectorizedScanner) parseLineIntoBlock(block *ColumnBlock, line []byte) 
 				distance, _ = parseUint64(field)
 			case 11: // azimuth
 				azimuth, _ = parseUint64(field)
-			case 12: // band
-				band, _ = parseInt64(field)
+			case 12: // band — skipped, normalized from frequency below
 			case 13: // version
 				version = truncateBytes(field, 8)
 			case 14: // code
@@ -335,7 +334,9 @@ func (s *VectorizedScanner) parseLineIntoBlock(block *ColumnBlock, line []byte) 
 	block.Drift = append(block.Drift, int8(drift))
 	block.Distance = append(block.Distance, uint32(distance))
 	block.Azimuth = append(block.Azimuth, uint16(azimuth))
-	block.Band = append(block.Band, int32(band))
+	// Normalize band from frequency (ignore CSV band column)
+	normalizedBand, _ := bands.GetBand(frequency)
+	block.Band = append(block.Band, normalizedBand)
 	block.Version = append(block.Version, version)
 	block.Code = append(block.Code, uint8(code))
 

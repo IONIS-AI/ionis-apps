@@ -28,10 +28,11 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/KI7MT/ki7mt-ai-lab-apps/internal/bands"
 	"github.com/klauspost/pgzip"
 )
 
-var Version = "fast-1.0.0"
+var Version = "fast-1.1.0"
 
 // =============================================================================
 // Configuration - Tuned for 9950X3D + NVMe
@@ -386,6 +387,10 @@ func (lr *LineReader) Process(ctx context.Context) error {
 		// Parse line directly into batch slot
 		if batch.Count < len(batch.Spots) {
 			if parseLine(line, &batch.Spots[batch.Count]) {
+				// Normalize band from frequency (single source of truth: bands.go)
+				spot := &batch.Spots[batch.Count]
+				freqMHz := float64(spot.Frequency) / 1_000_000.0
+				spot.Band, _ = bands.GetBand(freqMHz)
 				batch.Count++
 			}
 		}

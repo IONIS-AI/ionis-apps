@@ -12,10 +12,15 @@ This package provides command-line tools for ingesting and processing amateur ra
 
 | Command | Source Format | Throughput | Description |
 |---------|---------------|------------|-------------|
-| `wspr-shredder` | Uncompressed CSV | 14.4 Mrps | Fastest for pre-extracted CSV files |
-| `wspr-turbo` | Compressed .gz | 8.8 Mrps | Zero-copy streaming from archives |
-| `wspr-parquet-native` | Parquet | 8.4 Mrps | Native Go Parquet reader |
+| `wspr-turbo` | Compressed .gz | 24.67 Mrps | Zero-copy streaming from archives (champion) |
+| `wspr-shredder` | Uncompressed CSV | 21.81 Mrps | Fastest for pre-extracted CSV files |
+| `wspr-parquet-native` | Parquet | 17.02 Mrps | Native Go Parquet reader |
+| `wspr-ingest` | CSV | - | Standard CSV ingestion |
+| `wspr-ingest-cpu` | CSV | - | CPU-optimized CSV ingestion |
+| `wspr-ingest-fast` | Compressed .gz | - | Fast streaming ingestion |
 | `wspr-download` | - | - | Parallel archive downloader |
+
+**Band Normalization (v2.1.0)**: All CSV ingesters normalize the band column from the frequency field using `internal/bands.GetBand()`, producing correct ADIF band IDs (102-111 for HF). This fixes the legacy band encoding bug where raw CSV band values (MHz frequencies) were stored directly.
 
 ### Solar Tools
 
@@ -23,20 +28,20 @@ This package provides command-line tools for ingesting and processing amateur ra
 |---------|-------------|
 | `solar-ingest` | NOAA solar flux data ingestion into ClickHouse |
 
-## Benchmarks (Ryzen 9 9950X3D, 10.7B rows)
+## Benchmarks (Threadripper 9975WX, 10.8B rows, 24 workers)
 
 | Tool | Source Size | Time | Throughput |
 |------|-------------|------|------------|
-| wspr-shredder | 870 GB (CSV) | 12m24s | 14.40 Mrps |
-| wspr-turbo v1.1.0 | 184 GB (.gz) | 20m13s | 8.83 Mrps |
-| wspr-parquet-native | 103 GB (Parquet) | 21m13s | 8.41 Mrps |
+| **wspr-turbo** | 185 GB (.gz) | **7m18s** | **24.67 Mrps** |
+| wspr-shredder | 878 GB (CSV) | 8m15s | 21.81 Mrps |
+| wspr-parquet-native | 109 GB (Parquet) | 9m39s | 17.02 Mrps |
 
 ### End-to-End Pipeline Comparison
 
 | Pipeline | Total Time | Disk Written |
 |----------|------------|--------------|
-| decompress + shredder | ~37 min | 870 GB |
-| **wspr-turbo streaming** | **~20 min** | **0 GB** |
+| **wspr-turbo streaming** | **7m18s** | **0 GB** |
+| pigz + wspr-shredder | 9m31s | 878 GB |
 
 ## Requirements
 

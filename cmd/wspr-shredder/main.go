@@ -34,10 +34,11 @@ import (
 
 	"github.com/ClickHouse/ch-go"
 	"github.com/ClickHouse/ch-go/proto"
+	"github.com/KI7MT/ki7mt-ai-lab-apps/internal/bands"
 )
 
 // Version can be overridden at build time via -ldflags
-var Version = "2.0.8"
+var Version = "2.1.0"
 
 const (
 	ReadBufferSize = 1024 * 1024 // 1MB read buffer
@@ -221,9 +222,9 @@ func parseRow(record []string, batch *SpotBatch) error {
 	az, _ := strconv.ParseUint(record[11], 10, 16)
 	batch.Azimuth.Append(uint16(az))
 
-	// Band
-	band, _ := strconv.ParseInt(record[12], 10, 32)
-	batch.Band.Append(int32(band))
+	// Band — normalize from frequency (ignore CSV band column)
+	normalizedBand, _ := bands.GetBand(freq)
+	batch.Band.Append(normalizedBand)
 
 	// Mode
 	batch.Mode.Append("WSPR")
