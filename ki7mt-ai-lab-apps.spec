@@ -5,7 +5,7 @@
 %global goipath         github.com/KI7MT/ki7mt-ai-lab-apps
 
 Name:           ki7mt-ai-lab-apps
-Version:        2.0.5
+Version:        2.0.8
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -57,9 +57,11 @@ Requires:       %{name} = %{version}-%{release}
 
 %description solar
 Solar and geomagnetic data processing applications:
-- solar-download: Multi-source solar data downloader (SIDC, NOAA, GOES)
-- solar-ingest:   Solar/geomagnetic data ingestion (SFI, SSN, Kp, Ap, X-ray)
-- solar-refresh:  Download + truncate + ingest pipeline script
+- solar-download:     Multi-source solar data downloader (SIDC, NOAA, GOES)
+- solar-ingest:       Solar/geomagnetic data ingestion (SFI, SSN, Kp, Ap, X-ray)
+- solar-refresh:      Download + truncate + ingest pipeline script
+- solar-live-update:  Now-Casting live conditions updater (15-min cron)
+- solar-history-load: Historical solar data loader for training (6-hour cron)
 
 %prep
 %autosetup -n %{name}-%{version}
@@ -86,8 +88,18 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/solar-ingest
 %{_bindir}/solar-download
 %{_bindir}/solar-refresh
+%{_bindir}/solar-live-update
+%{_bindir}/solar-history-load
 
 %changelog
+* Mon Feb 03 2026 Greg Beam <ki7mt@yahoo.com> - 2.0.8-1
+- Fix Silent Sun: solar-download now fetches NOAA SFI summary endpoint
+- Add 3 new NOAA data sources (SFI live, SFI 30-day, X-ray 7-day)
+- Add solar-live-update.sh for Now-Casting (15-min cron)
+- Add solar-history-load.sh for training data (6-hour cron)
+- Fix solar-live-update to parse correct SFI file with Cycle 25 fallback
+- solar-download expanded from 7 to 10 data sources
+
 * Mon Jan 20 2025 Greg Beam <ki7mt@yahoo.com> - 2.0.3-1
 - Sync version across all lab packages
 - Fix maintainer email in changelog

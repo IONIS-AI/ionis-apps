@@ -55,7 +55,7 @@ SOLAR_CMDS  := solar-ingest solar-download
 ALL_CMDS    := $(WSPR_CMDS) $(SOLAR_CMDS)
 
 # Shell scripts to install
-SOLAR_SCRIPTS := solar-refresh.sh
+SOLAR_SCRIPTS := solar-refresh.sh solar-live-update.sh solar-history-load.sh
 
 # =============================================================================
 # Default Target

@@ -31,7 +31,7 @@ import (
 	"github.com/klauspost/pgzip"
 )
 
-var Version = "2.0.5"
+var Version = "2.0.8"
 
 // =============================================================================
 // Configuration - Tuned for high-performance multi-core systems

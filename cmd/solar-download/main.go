@@ -19,7 +19,7 @@ import (
 )
 
 // Version can be overridden at build time via -ldflags
-var Version = "2.0.5"
+var Version = "2.0.8"
 
 // DataSource defines a solar data source
 type DataSource struct {
@@ -60,6 +60,19 @@ var sources = []DataSource{
 		Filename: "penticton_flux.txt",
 		Desc:     "Penticton 10.7cm daily flux",
 	},
+	// Solar Flux (Live)
+	{
+		Name:     "noaa_sfi_summary",
+		URL:      "https://services.swpc.noaa.gov/products/summary/10cm-flux.json",
+		Filename: "noaa_solar_flux.json",
+		Desc:     "NOAA 10.7cm solar flux summary (live)",
+	},
+	{
+		Name:     "noaa_sfi_30day",
+		URL:      "https://services.swpc.noaa.gov/products/10cm-flux-30-day.json",
+		Filename: "noaa_sfi_30day.json",
+		Desc:     "NOAA 10.7cm solar flux (30-day history)",
+	},
 	// Geomagnetic indices (Earth Response)
 	{
 		Name:     "noaa_kp",
@@ -73,6 +86,12 @@ var sources = []DataSource{
 		URL:      "https://services.swpc.noaa.gov/json/goes/primary/xrays-6-hour.json",
 		Filename: "goes_xray_flux.json",
 		Desc:     "GOES X-ray flux (6-hour rolling window)",
+	},
+	{
+		Name:     "goes_xray_7day",
+		URL:      "https://services.swpc.noaa.gov/json/goes/primary/xrays-7-day.json",
+		Filename: "goes_xray_7day.json",
+		Desc:     "GOES X-ray flux (7-day history for training)",
 	},
 }
 
