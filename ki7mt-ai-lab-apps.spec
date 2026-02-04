@@ -5,7 +5,7 @@
 %global goipath         github.com/KI7MT/ki7mt-ai-lab-apps
 
 Name:           ki7mt-ai-lab-apps
-Version:        2.1.0
+Version:        2.2.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -87,11 +87,17 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %files solar
 %{_bindir}/solar-ingest
 %{_bindir}/solar-download
+%{_bindir}/solar-backfill
 %{_bindir}/solar-refresh
 %{_bindir}/solar-live-update
 %{_bindir}/solar-history-load
 
 %changelog
+* Tue Feb 04 2026 Greg Beam <ki7mt@yahoo.com> - 2.2.0-1
+- Add solar-backfill: GFZ Potsdam historical SSN/SFI/Kp backfill (1932-present)
+- Add solar-backfill to RPM solar subpackage
+- Phase 4.1 SSN Signal Recovery: backfill 25+ years of solar indices
+
 * Mon Feb 03 2026 Greg Beam <ki7mt@yahoo.com> - 2.1.0-1
 - Normalize band from frequency in all 5 CSV ingesters via bands.GetBand()
 - Add internal/bands package: ADIF-MCP v3.1.6 full-spectrum band lookup
