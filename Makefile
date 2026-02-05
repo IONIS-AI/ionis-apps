@@ -10,7 +10,7 @@
 #   make clean        # Remove build artifacts
 
 SHELL := /bin/bash
-.PHONY: help all build install uninstall test clean lint fmt vet wspr solar
+.PHONY: help all build install uninstall test clean lint fmt vet wspr solar contest
 
 # =============================================================================
 # Package Metadata
@@ -51,8 +51,9 @@ DISTDIR      := dist
 # Note: Legacy tools (wspr-ingest, wspr-ingest-cpu, wspr-ingest-fast) removed
 #       due to clickhouse-go/v2 API incompatibility. Replaced by faster tools.
 WSPR_CMDS   := wspr-shredder wspr-turbo wspr-parquet-native wspr-download
-SOLAR_CMDS  := solar-ingest solar-download solar-backfill
-ALL_CMDS    := $(WSPR_CMDS) $(SOLAR_CMDS)
+SOLAR_CMDS   := solar-ingest solar-download solar-backfill
+CONTEST_CMDS := contest-download rbn-download
+ALL_CMDS     := $(WSPR_CMDS) $(SOLAR_CMDS) $(CONTEST_CMDS)
 
 # Shell scripts to install
 SOLAR_SCRIPTS := solar-refresh.sh solar-live-update.sh solar-history-load.sh
@@ -80,6 +81,10 @@ help:
 	@printf "  solar-ingest         Solar/geomagnetic data ingester\n"
 	@printf "  solar-refresh        Download + ingest pipeline script\n"
 	@printf "\n"
+	@printf "Contest Tools:\n"
+	@printf "  contest-download     CQ contest Cabrillo log downloader\n"
+	@printf "  rbn-download         Reverse Beacon Network archive downloader\n"
+	@printf "\n"
 	@printf "Usage: make [target]\n"
 	@printf "\n"
 	@printf "Targets:\n"
@@ -87,6 +92,7 @@ help:
 	@printf "  all           Build all binaries\n"
 	@printf "  wspr          Build WSPR binaries only\n"
 	@printf "  solar         Build Solar binaries only\n"
+	@printf "  contest       Build Contest binaries only\n"
 	@printf "  install       Install to system (PREFIX=$(PREFIX))\n"
 	@printf "  uninstall     Remove installed files\n"
 	@printf "  test          Run Go tests\n"
@@ -121,6 +127,10 @@ wspr: $(addprefix $(BINDIR_BUILD)/,$(WSPR_CMDS))
 solar: $(addprefix $(BINDIR_BUILD)/,$(SOLAR_CMDS))
 	@printf "\nSolar tools built:\n"
 	@for cmd in $(SOLAR_CMDS); do printf "  $(BINDIR_BUILD)/$$cmd\n"; done
+
+contest: $(addprefix $(BINDIR_BUILD)/,$(CONTEST_CMDS))
+	@printf "\nContest tools built:\n"
+	@for cmd in $(CONTEST_CMDS); do printf "  $(BINDIR_BUILD)/$$cmd\n"; done
 
 # Generic build rule for all commands
 $(BINDIR_BUILD)/%: cmd/%/main.go | $(BINDIR_BUILD)
