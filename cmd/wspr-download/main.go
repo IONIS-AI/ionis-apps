@@ -158,7 +158,7 @@ func generateFileList(startYear, startMonth, endYear, endMonth int) []string {
 }
 
 func main() {
-	destDir := flag.String("dest", "/mnt/ai-stack/wspr-data/raw", "Destination directory")
+	destDir := flag.String("dest", "/mnt/wspr-data", "Destination directory")
 	workers := flag.Int("workers", 4, "Parallel download workers")
 	delay := flag.Duration("delay", 1*time.Second, "Delay between HTTP requests per worker")
 	timeout := flag.Duration("timeout", 300*time.Second, "HTTP timeout per download")
