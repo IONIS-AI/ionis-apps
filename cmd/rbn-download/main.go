@@ -31,7 +31,7 @@ import (
 // Version can be overridden at build time via -ldflags
 var Version = "2.2.0"
 
-var userAgent = fmt.Sprintf("rbn-download/%s (KI7MT; ki7mt@yahoo.com)", Version)
+var userAgent = fmt.Sprintf("rbn-download/%s (ki7mt-ai-lab)", Version)
 
 const (
 	baseURL = "https://data.reversebeacon.net/rbn_history/"

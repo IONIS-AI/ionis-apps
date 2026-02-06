@@ -1,4 +1,8 @@
-// contest-download - Download public Cabrillo logs from CQ contest sites
+// contest-download - Download public Cabrillo logs from contest sites
+//
+// Supported sources:
+//   - CQ contests (cqww.com, cqwpx.com, etc.) — directory-listing index
+//   - ARRL contests (contests.arrl.org) — hash-based public log URLs
 //
 // Good neighbor policy:
 //   - Sequential downloads only, zero parallelism
@@ -32,76 +36,196 @@ import (
 // Version can be overridden at build time via -ldflags
 var Version = "2.2.0"
 
-var userAgent = fmt.Sprintf("contest-download/%s (KI7MT; ki7mt@yahoo.com)", Version)
+var userAgent = fmt.Sprintf("contest-download/%s (ki7mt-ai-lab)", Version)
 
-// Contest defines a CQ contest data source.
+// Contest defines a contest data source.
 type Contest struct {
-	Key     string
-	Name    string
-	BaseURL string
-	Modes   []string // e.g. ["ph","cw"] or nil for single-mode contests
-	YearMin int
-	YearMax int
+	Key       string
+	Name      string
+	BaseURL   string
+	Modes     []string       // e.g. ["ph","cw"] or nil for single-mode contests
+	YearMin   int
+	YearMax   int
+	IndexType string         // "cq" (directory listing) or "arrl" (hash-based)
+	EID       int            // ARRL event ID (only for IndexType "arrl")
+	YearIIDs  map[int]int    // ARRL year → instance ID (only for IndexType "arrl")
 }
 
 var contests = []Contest{
+	// === CQ Contests (directory-listing pattern) ===
 	{
-		Key:     "cq-ww",
-		Name:    "CQ WW",
-		BaseURL: "https://cqww.com/publiclogs/",
-		Modes:   []string{"ph", "cw"},
-		YearMin: 2005,
-		YearMax: 2025,
+		Key:       "cq-ww",
+		Name:      "CQ WW",
+		BaseURL:   "https://cqww.com/publiclogs/",
+		Modes:     []string{"ph", "cw"},
+		YearMin:   2005,
+		YearMax:   2025,
+		IndexType: "cq",
 	},
 	{
-		Key:     "cq-wpx",
-		Name:    "CQ WPX",
-		BaseURL: "https://cqwpx.com/publiclogs/",
-		Modes:   []string{"ph", "cw"},
-		YearMin: 2008,
-		YearMax: 2025,
+		Key:       "cq-wpx",
+		Name:      "CQ WPX",
+		BaseURL:   "https://cqwpx.com/publiclogs/",
+		Modes:     []string{"ph", "cw"},
+		YearMin:   2008,
+		YearMax:   2025,
+		IndexType: "cq",
 	},
 	{
-		Key:     "cq-ww-rtty",
-		Name:    "CQ WW RTTY",
-		BaseURL: "https://cqwwrtty.com/publiclogs/",
-		Modes:   nil,
-		YearMin: 2009,
-		YearMax: 2024,
+		Key:       "cq-ww-rtty",
+		Name:      "CQ WW RTTY",
+		BaseURL:   "https://cqwwrtty.com/publiclogs/",
+		Modes:     nil,
+		YearMin:   2009,
+		YearMax:   2024,
+		IndexType: "cq",
 	},
 	{
-		Key:     "cq-wpx-rtty",
-		Name:    "CQ WPX RTTY",
-		BaseURL: "https://cqwpxrtty.com/publiclogs/",
-		Modes:   nil,
-		YearMin: 2012,
-		YearMax: 2025,
+		Key:       "cq-wpx-rtty",
+		Name:      "CQ WPX RTTY",
+		BaseURL:   "https://cqwpxrtty.com/publiclogs/",
+		Modes:     nil,
+		YearMin:   2012,
+		YearMax:   2025,
+		IndexType: "cq",
 	},
 	{
-		Key:     "cq-160",
-		Name:    "CQ 160",
-		BaseURL: "https://cq160.com/publiclogs/",
-		Modes:   []string{"ph", "cw"},
-		YearMin: 2022,
-		YearMax: 2025,
+		Key:       "cq-160",
+		Name:      "CQ 160",
+		BaseURL:   "https://cq160.com/publiclogs/",
+		Modes:     []string{"ph", "cw"},
+		YearMin:   2022,
+		YearMax:   2025,
+		IndexType: "cq",
 	},
 	{
-		Key:     "ww-digi",
-		Name:    "WW Digi",
-		BaseURL: "https://ww-digi.com/publiclogs/",
-		Modes:   nil,
-		YearMin: 2019,
-		YearMax: 2025,
+		Key:       "ww-digi",
+		Name:      "WW Digi",
+		BaseURL:   "https://ww-digi.com/publiclogs/",
+		Modes:     nil,
+		YearMin:   2019,
+		YearMax:   2025,
+		IndexType: "cq",
+	},
+
+	// === ARRL Contests (hash-based pattern) ===
+	{
+		Key:       "arrl-dx-cw",
+		Name:      "ARRL DX CW",
+		BaseURL:   "https://contests.arrl.org/",
+		Modes:     nil,
+		YearMin:   2018,
+		YearMax:   2025,
+		IndexType: "arrl",
+		EID:       13,
+		YearIIDs:  map[int]int{2018: 82, 2019: 582, 2020: 707, 2021: 960, 2022: 1006, 2023: 1032, 2024: 1059, 2025: 1096},
+	},
+	{
+		Key:       "arrl-dx-ph",
+		Name:      "ARRL DX Phone",
+		BaseURL:   "https://contests.arrl.org/",
+		Modes:     nil,
+		YearMin:   2018,
+		YearMax:   2025,
+		IndexType: "arrl",
+		EID:       14,
+		YearIIDs:  map[int]int{2018: 106, 2019: 597, 2020: 709, 2021: 961, 2022: 1007, 2023: 1033, 2024: 1060, 2025: 1097},
+	},
+	{
+		Key:       "arrl-10m",
+		Name:      "ARRL 10m",
+		BaseURL:   "https://contests.arrl.org/",
+		Modes:     nil,
+		YearMin:   2018,
+		YearMax:   2024,
+		IndexType: "arrl",
+		EID:       21,
+		YearIIDs:  map[int]int{2018: 135, 2019: 688, 2020: 725, 2021: 988, 2022: 1013, 2023: 1045, 2024: 1073},
+	},
+	{
+		Key:       "arrl-160m",
+		Name:      "ARRL 160m",
+		BaseURL:   "https://contests.arrl.org/",
+		Modes:     nil,
+		YearMin:   2018,
+		YearMax:   2024,
+		IndexType: "arrl",
+		EID:       20,
+		YearIIDs:  map[int]int{2018: 164, 2019: 689, 2020: 726, 2021: 989, 2022: 1014, 2023: 1046, 2024: 1074},
+	},
+	{
+		Key:       "arrl-ss-cw",
+		Name:      "ARRL SS CW",
+		BaseURL:   "https://contests.arrl.org/",
+		Modes:     nil,
+		YearMin:   2018,
+		YearMax:   2024,
+		IndexType: "arrl",
+		EID:       17,
+		YearIIDs:  map[int]int{2018: 18, 2019: 693, 2020: 719, 2021: 991, 2022: 1016, 2023: 1048, 2024: 1070},
+	},
+	{
+		Key:       "arrl-ss-ph",
+		Name:      "ARRL SS Phone",
+		BaseURL:   "https://contests.arrl.org/",
+		Modes:     nil,
+		YearMin:   2018,
+		YearMax:   2024,
+		IndexType: "arrl",
+		EID:       18,
+		YearIIDs:  map[int]int{2018: 54, 2019: 694, 2020: 720, 2021: 992, 2022: 1017, 2023: 1049, 2024: 1071},
+	},
+	{
+		Key:       "arrl-rtty",
+		Name:      "ARRL RTTY RU",
+		BaseURL:   "https://contests.arrl.org/",
+		Modes:     nil,
+		YearMin:   2018,
+		YearMax:   2025,
+		IndexType: "arrl",
+		EID:       6,
+		YearIIDs:  map[int]int{2018: 184, 2019: 581, 2020: 705, 2021: 730, 2022: 1004, 2023: 1029, 2024: 1058, 2025: 1095},
+	},
+	{
+		Key:       "arrl-digi",
+		Name:      "ARRL Digital",
+		BaseURL:   "https://contests.arrl.org/",
+		Modes:     nil,
+		YearMin:   2022,
+		YearMax:   2025,
+		IndexType: "arrl",
+		EID:       31,
+		YearIIDs:  map[int]int{2022: 1023, 2023: 1036, 2024: 1068, 2025: 1100},
+	},
+	{
+		Key:       "iaru-hf",
+		Name:      "IARU HF",
+		BaseURL:   "https://contests.arrl.org/",
+		Modes:     nil,
+		YearMin:   2018,
+		YearMax:   2025,
+		IndexType: "arrl",
+		EID:       4,
+		YearIIDs:  map[int]int{2018: 202, 2019: 683, 2020: 714, 2021: 997, 2022: 1022, 2023: 1053, 2024: 1064, 2025: 1110},
 	},
 }
 
-// logLinkRe extracts .log file links from an HTML index page.
-// Handles both single and double quoted href attributes.
+// logLinkRe extracts .log file links from CQ contest index pages.
 var logLinkRe = regexp.MustCompile(`href=['"]([^'"]+\.log)['"]`)
+
+// arrlLogRe extracts callsign+hash pairs from ARRL public log pages.
+// Format: <a href="showpubliclog.php?q=HASH" target="_new">CALLSIGN</a>
+var arrlLogRe = regexp.MustCompile(`showpubliclog\.php\?q=([^"]+)"[^>]*>([^<]+)</a>`)
+
+// logEntry holds a callsign and optional ARRL hash for manifest storage.
+type logEntry struct {
+	Callsign string
+	Hash     string // ARRL only; empty for CQ
+}
 
 func main() {
 	destDir := flag.String("dest", "/mnt/contest-logs", "Destination directory")
-	contestKey := flag.String("contest", "all", "Contest key (cq-ww, cq-wpx, cq-ww-rtty, cq-wpx-rtty, cq-160, ww-digi, all)")
+	contestKey := flag.String("contest", "all", "Contest key (use --list to see options, or 'all')")
 	year := flag.Int("year", 0, "Download only this year (0 = all years)")
 	mode := flag.String("mode", "", "Download only this mode: ph, cw (empty = all modes)")
 	delay := flag.Duration("delay", 3*time.Second, "Delay between HTTP requests")
@@ -111,23 +235,17 @@ func main() {
 	listContests := flag.Bool("list", false, "List available contests and exit")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "contest-download v%s — CQ Contest Log Downloader\n\n", Version)
+		fmt.Fprintf(os.Stderr, "contest-download v%s — Contest Log Downloader\n\n", Version)
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags]\n\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Downloads public Cabrillo logs from CQ contest websites.\n")
+		fmt.Fprintf(os.Stderr, "Downloads public Cabrillo logs from CQ and ARRL contest websites.\n")
 		fmt.Fprintf(os.Stderr, "Good neighbor: sequential requests, configurable delay, resume-friendly.\n\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nContests:\n")
-		for _, c := range contests {
-			modes := "(none)"
-			if len(c.Modes) > 0 {
-				modes = strings.Join(c.Modes, ", ")
-			}
-			fmt.Fprintf(os.Stderr, "  %-14s %-12s modes: %-8s years: %d–%d\n",
-				c.Key, c.Name, modes, c.YearMin, c.YearMax)
-		}
+		printContestTable(os.Stderr)
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
 		fmt.Fprintf(os.Stderr, "  contest-download --list\n")
 		fmt.Fprintf(os.Stderr, "  contest-download --contest cq-ww --year 2024 --mode cw\n")
+		fmt.Fprintf(os.Stderr, "  contest-download --contest arrl-dx-cw --year 2024\n")
 		fmt.Fprintf(os.Stderr, "  contest-download --dry-run\n")
 		fmt.Fprintf(os.Stderr, "  contest-download --delay 5s\n")
 	}
@@ -137,14 +255,7 @@ func main() {
 	if *listContests {
 		fmt.Printf("contest-download v%s\n\n", Version)
 		fmt.Printf("Available contests:\n\n")
-		for _, c := range contests {
-			modes := "(single mode)"
-			if len(c.Modes) > 0 {
-				modes = strings.Join(c.Modes, ", ")
-			}
-			fmt.Printf("  %-14s %-12s modes: %-14s years: %d–%d\n",
-				c.Key, c.Name, modes, c.YearMin, c.YearMax)
-		}
+		printContestTable(os.Stdout)
 		return
 	}
 
@@ -194,7 +305,7 @@ func main() {
 	}
 	fmt.Println()
 
-	// Build work list: (contest, year, mode-suffix) tuples
+	// Build work list
 	type workItem struct {
 		contest Contest
 		year    int
@@ -211,6 +322,12 @@ func main() {
 			if *year != 0 && y != *year {
 				continue
 			}
+			// For ARRL, skip years that don't have an iid mapping
+			if c.IndexType == "arrl" {
+				if _, ok := c.YearIIDs[y]; !ok {
+					continue
+				}
+			}
 			if len(c.Modes) > 0 {
 				for _, m := range c.Modes {
 					if *mode != "" && m != *mode {
@@ -224,7 +341,6 @@ func main() {
 					})
 				}
 			} else {
-				// Single-mode contest — skip if user requested a specific mode
 				if *mode != "" {
 					continue
 				}
@@ -261,40 +377,49 @@ func main() {
 
 		// Phase 1: Get or load manifest
 		manifestPath := filepath.Join(contestDir, "manifest.txt")
-		var callsigns []string
+		var entries []logEntry
 
 		if !*refresh {
 			if existing, err := readManifest(manifestPath); err == nil && len(existing) > 0 {
-				callsigns = existing
-				fmt.Printf("  Manifest cached: %d logs\n", len(callsigns))
+				entries = existing
+				fmt.Printf("  Manifest cached: %d logs\n", len(entries))
 			}
 		}
 
-		if callsigns == nil {
-			indexURL := w.contest.BaseURL + w.subdir + "/"
-			fmt.Printf("  Fetching index: %s\n", indexURL)
+		if entries == nil {
+			var fetched []logEntry
+			var err error
 
-			fetched, err := fetchIndex(ctx, client, indexURL)
+			switch w.contest.IndexType {
+			case "arrl":
+				iid := w.contest.YearIIDs[w.year]
+				indexURL := fmt.Sprintf("%spubliclogs.php?eid=%d&iid=%d", w.contest.BaseURL, w.contest.EID, iid)
+				fmt.Printf("  Fetching index: %s\n", indexURL)
+				fetched, err = fetchARRLIndex(ctx, client, indexURL)
+			default: // "cq"
+				indexURL := w.contest.BaseURL + w.subdir + "/"
+				fmt.Printf("  Fetching index: %s\n", indexURL)
+				fetched, err = fetchCQIndex(ctx, client, indexURL)
+			}
+
 			if err != nil {
 				fmt.Printf("  WARNING: index fetch failed: %v (skipping)\n", err)
 				fmt.Println()
-				// Delay even on failure to be polite
 				sleepWithContext(ctx, *delay)
 				continue
 			}
 
-			callsigns = fetched
-			fmt.Printf("  %d logs found\n", len(callsigns))
+			entries = fetched
+			fmt.Printf("  %d logs found\n", len(entries))
 
-			if err := writeManifest(manifestPath, callsigns); err != nil {
+			if err := writeManifest(manifestPath, entries); err != nil {
 				fmt.Fprintf(os.Stderr, "  WARNING: cannot write manifest: %v\n", err)
 			}
 
-			// Delay after index fetch
 			sleepWithContext(ctx, *delay)
 		}
 
-		if len(callsigns) == 0 {
+		if len(entries) == 0 {
 			fmt.Printf("  No logs to download\n")
 			fmt.Println()
 			continue
@@ -307,16 +432,16 @@ func main() {
 
 		// Phase 2: Download logs
 		downloaded, skipped, failed := 0, 0, 0
-		for i, cs := range callsigns {
+		for i, e := range entries {
 			if ctx.Err() != nil {
-				remaining := len(callsigns) - i
+				remaining := len(entries) - i
 				totalRemaining += remaining
 				fmt.Printf("  [%*d/%d] %s — interrupted (Ctrl+C)\n",
-					countWidth(len(callsigns)), i+1, len(callsigns), cs+".log")
+					countWidth(len(entries)), i+1, len(entries), e.Callsign+".log")
 				break
 			}
 
-			logFile := filepath.Join(contestDir, cs+".log")
+			logFile := filepath.Join(contestDir, e.Callsign+".log")
 
 			// Resume: skip if file already exists
 			if _, err := os.Stat(logFile); err == nil {
@@ -324,19 +449,26 @@ func main() {
 				continue
 			}
 
-			logURL := w.contest.BaseURL + w.subdir + "/" + cs + ".log"
+			// Construct download URL based on index type
+			var logURL string
+			switch w.contest.IndexType {
+			case "arrl":
+				logURL = w.contest.BaseURL + "showpubliclog.php?q=" + e.Hash
+			default:
+				logURL = w.contest.BaseURL + w.subdir + "/" + e.Callsign + ".log"
+			}
+
 			size, err := downloadFile(ctx, client, logURL, logFile)
 			if err != nil {
 				fmt.Printf("  [%*d/%d] %s FAILED: %v\n",
-					countWidth(len(callsigns)), i+1, len(callsigns), cs+".log", err)
+					countWidth(len(entries)), i+1, len(entries), e.Callsign+".log", err)
 				failed++
 			} else {
 				fmt.Printf("  [%*d/%d] %s (%s) OK\n",
-					countWidth(len(callsigns)), i+1, len(callsigns), cs+".log", formatBytes(size))
+					countWidth(len(entries)), i+1, len(entries), e.Callsign+".log", formatBytes(size))
 				downloaded++
 			}
 
-			// Delay between requests
 			sleepWithContext(ctx, *delay)
 		}
 
@@ -362,8 +494,74 @@ func main() {
 	}
 }
 
-// fetchIndex GETs the contest index page and extracts .log file links.
-func fetchIndex(ctx context.Context, client *http.Client, url string) ([]string, error) {
+// fetchCQIndex fetches a CQ-style directory listing and extracts .log links.
+func fetchCQIndex(ctx context.Context, client *http.Client, url string) ([]logEntry, error) {
+	body, err := httpGet(ctx, client, url)
+	if err != nil {
+		return nil, err
+	}
+	return parseCQIndex(body), nil
+}
+
+// parseCQIndex extracts .log filenames from HTML directory listing.
+func parseCQIndex(html []byte) []logEntry {
+	matches := logLinkRe.FindAllSubmatch(html, -1)
+	seen := make(map[string]bool, len(matches))
+	var entries []logEntry
+
+	for _, m := range matches {
+		filename := string(m[1])
+		filename = filepath.Base(filename)
+		cs := strings.TrimSuffix(filename, ".log")
+		cs = strings.ToLower(cs)
+		if cs != "" && !seen[cs] {
+			seen[cs] = true
+			entries = append(entries, logEntry{Callsign: cs})
+		}
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Callsign < entries[j].Callsign
+	})
+	return entries
+}
+
+// fetchARRLIndex fetches an ARRL public logs page and extracts callsign+hash pairs.
+func fetchARRLIndex(ctx context.Context, client *http.Client, url string) ([]logEntry, error) {
+	body, err := httpGet(ctx, client, url)
+	if err != nil {
+		return nil, err
+	}
+	return parseARRLIndex(body), nil
+}
+
+// parseARRLIndex extracts callsign and hash pairs from ARRL HTML.
+// Format: showpubliclog.php?q=HASH" target="_new">CALLSIGN</a>
+func parseARRLIndex(html []byte) []logEntry {
+	matches := arrlLogRe.FindAllSubmatch(html, -1)
+	seen := make(map[string]bool, len(matches))
+	var entries []logEntry
+
+	for _, m := range matches {
+		hash := string(m[1])
+		callsign := strings.TrimSpace(string(m[2]))
+		callsign = strings.ToLower(callsign)
+		// Normalize callsign for filename safety (replace / with -)
+		callsign = strings.ReplaceAll(callsign, "/", "-")
+		if callsign != "" && !seen[callsign] {
+			seen[callsign] = true
+			entries = append(entries, logEntry{Callsign: callsign, Hash: hash})
+		}
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Callsign < entries[j].Callsign
+	})
+	return entries
+}
+
+// httpGet performs a GET request and returns the response body.
+func httpGet(ctx context.Context, client *http.Client, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -385,29 +583,7 @@ func fetchIndex(ctx context.Context, client *http.Client, url string) ([]string,
 		return nil, fmt.Errorf("read body: %w", err)
 	}
 
-	return parseIndex(body), nil
-}
-
-// parseIndex extracts .log filenames from HTML, returning callsigns (without .log extension).
-func parseIndex(html []byte) []string {
-	matches := logLinkRe.FindAllSubmatch(html, -1)
-	seen := make(map[string]bool, len(matches))
-	var callsigns []string
-
-	for _, m := range matches {
-		filename := string(m[1])
-		// Strip directory prefix if present (href might be "path/call.log")
-		filename = filepath.Base(filename)
-		cs := strings.TrimSuffix(filename, ".log")
-		cs = strings.ToLower(cs)
-		if cs != "" && !seen[cs] {
-			seen[cs] = true
-			callsigns = append(callsigns, cs)
-		}
-	}
-
-	sort.Strings(callsigns)
-	return callsigns
+	return body, nil
 }
 
 // downloadFile GETs a URL and writes it atomically via tmp+rename.
@@ -450,8 +626,10 @@ func downloadFile(ctx context.Context, client *http.Client, url, destPath string
 	return n, nil
 }
 
-// writeManifest writes callsigns to a manifest file (one per line).
-func writeManifest(path string, callsigns []string) error {
+// writeManifest writes log entries to a manifest file.
+// CQ entries: one callsign per line.
+// ARRL entries: callsign<tab>hash per line.
+func writeManifest(path string, entries []logEntry) error {
 	tmpPath := path + ".tmp"
 	f, err := os.Create(tmpPath)
 	if err != nil {
@@ -459,8 +637,12 @@ func writeManifest(path string, callsigns []string) error {
 	}
 
 	w := bufio.NewWriter(f)
-	for _, cs := range callsigns {
-		fmt.Fprintln(w, cs)
+	for _, e := range entries {
+		if e.Hash != "" {
+			fmt.Fprintf(w, "%s\t%s\n", e.Callsign, e.Hash)
+		} else {
+			fmt.Fprintln(w, e.Callsign)
+		}
 	}
 	if err := w.Flush(); err != nil {
 		f.Close()
@@ -472,27 +654,50 @@ func writeManifest(path string, callsigns []string) error {
 	return os.Rename(tmpPath, path)
 }
 
-// readManifest reads callsigns from an existing manifest file.
-func readManifest(path string) ([]string, error) {
+// readManifest reads log entries from an existing manifest file.
+// Supports both formats: "callsign" and "callsign\thash".
+func readManifest(path string) ([]logEntry, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	var callsigns []string
+	var entries []logEntry
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line != "" {
-			callsigns = append(callsigns, line)
+		if line == "" {
+			continue
 		}
+		parts := strings.SplitN(line, "\t", 2)
+		e := logEntry{Callsign: parts[0]}
+		if len(parts) == 2 {
+			e.Hash = parts[1]
+		}
+		entries = append(entries, e)
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
 
-	return callsigns, nil
+	return entries, nil
+}
+
+// printContestTable prints the contest list in a formatted table.
+func printContestTable(w io.Writer) {
+	for _, c := range contests {
+		modes := "(single mode)"
+		if len(c.Modes) > 0 {
+			modes = strings.Join(c.Modes, ", ")
+		}
+		src := "CQ"
+		if c.IndexType == "arrl" {
+			src = "ARRL"
+		}
+		fmt.Fprintf(w, "  %-16s %-14s %-6s modes: %-14s years: %d–%d\n",
+			c.Key, c.Name, src, modes, c.YearMin, c.YearMax)
+	}
 }
 
 // sleepWithContext sleeps for the given duration, returning early if ctx is cancelled.
