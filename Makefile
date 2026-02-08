@@ -52,7 +52,7 @@ DISTDIR      := dist
 #       due to clickhouse-go/v2 API incompatibility. Replaced by faster tools.
 WSPR_CMDS   := wspr-shredder wspr-turbo wspr-parquet-native wspr-download
 SOLAR_CMDS   := solar-ingest solar-download solar-backfill
-CONTEST_CMDS := contest-download rbn-download
+CONTEST_CMDS := contest-download rbn-download rbn-ingest contest-ingest
 ALL_CMDS     := $(WSPR_CMDS) $(SOLAR_CMDS) $(CONTEST_CMDS)
 
 # Shell scripts to install
@@ -84,6 +84,8 @@ help:
 	@printf "Contest Tools:\n"
 	@printf "  contest-download     CQ contest Cabrillo log downloader\n"
 	@printf "  rbn-download         Reverse Beacon Network archive downloader\n"
+	@printf "  rbn-ingest           RBN ZIP→CSV→ClickHouse ingester\n"
+	@printf "  contest-ingest       Cabrillo log→ClickHouse ingester\n"
 	@printf "\n"
 	@printf "Usage: make [target]\n"
 	@printf "\n"

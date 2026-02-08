@@ -113,25 +113,25 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/rbn-ingest
 
 %changelog
-* Fri Feb 07 2026 Greg Beam <ki7mt@yahoo.com> - 2.3.0-1
+* Sat Feb 07 2026 Greg Beam <ki7mt@yahoo.com> - 2.3.0-1
 - Add contest subpackage: contest-download, contest-ingest, rbn-download, rbn-ingest
 - contest-ingest: Cabrillo V2/V3 parser, 225.7M QSOs from 475K files across 15 contests
 - rbn-ingest: RBN ZIP→CSV→ClickHouse, 2.18B rows in 3m32s (10.32 Mrps)
 - Align version across all lab packages at 2.3.0
 
-* Tue Feb 04 2026 Greg Beam <ki7mt@yahoo.com> - 2.2.0-1
+* Wed Feb 04 2026 Greg Beam <ki7mt@yahoo.com> - 2.2.0-1
 - Add solar-backfill: GFZ Potsdam historical SSN/SFI/Kp backfill (1932-present)
 - Add solar-backfill to RPM solar subpackage
 - Phase 4.1 SSN Signal Recovery: backfill 25+ years of solar indices
 
-* Mon Feb 03 2026 Greg Beam <ki7mt@yahoo.com> - 2.1.0-1
+* Tue Feb 03 2026 Greg Beam <ki7mt@yahoo.com> - 2.1.0-1
 - Normalize band from frequency in all 5 CSV ingesters via bands.GetBand()
 - Add internal/bands package: ADIF-MCP v3.1.6 full-spectrum band lookup
 - Remove legacy Python ingester (source of band column contamination)
 - Update benchmarks: wspr-turbo 24.67 Mrps, wspr-shredder 21.81 Mrps (9975WX)
 - Align version across all lab packages at 2.1.0
 
-* Mon Feb 03 2026 Greg Beam <ki7mt@yahoo.com> - 2.0.8-1
+* Tue Feb 03 2026 Greg Beam <ki7mt@yahoo.com> - 2.0.8-1
 - Fix Silent Sun: solar-download now fetches NOAA SFI summary endpoint
 - Add 3 new NOAA data sources (SFI live, SFI 30-day, X-ray 7-day)
 - Add solar-live-update.sh for Now-Casting (15-min cron)
@@ -143,7 +143,7 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 - Sync version across all lab packages
 - Fix maintainer email in changelog
 
-* Sun Jan 18 2025 Greg Beam <ki7mt@yahoo.com> - 2.0.0-1
+* Sat Jan 18 2025 Greg Beam <ki7mt@yahoo.com> - 2.0.0-1
 - Major release with high-performance ingestion tools
 - Add wspr-shredder: 14.4 Mrps uncompressed CSV ingester
 - Add wspr-turbo: 8.8 Mrps streaming .gz ingester with klauspost/gzip
@@ -152,7 +152,7 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 - Remove CUDA/GPU dependencies (CPU-only, static binaries)
 - Update to Go 1.24
 
-* Sat Jan 17 2025 Greg Beam <ki7mt@yahoo.com> - 1.0.0-1
+* Fri Jan 17 2025 Greg Beam <ki7mt@yahoo.com> - 1.0.0-1
 - Initial package release
 - Add wspr-ingest: CSV ingestion with dual-path (GPU/CPU)
 - Add wspr-download: Parallel WSPR archive downloader
