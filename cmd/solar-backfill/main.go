@@ -33,7 +33,7 @@ import (
 	"github.com/ClickHouse/ch-go/proto"
 )
 
-var Version = "1.0.0"
+var Version = "dev"
 
 const (
 	gfzURL     = "https://kp.gfz-potsdam.de/app/files/Kp_ap_Ap_SN_F107_since_1932.txt"

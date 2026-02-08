@@ -91,6 +91,7 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %doc README.md
 %dir %{_datadir}/%{name}
 %dir %{_sysconfdir}/%{name}
+%{_bindir}/db-validate
 
 %files wspr
 %{_bindir}/wspr-shredder

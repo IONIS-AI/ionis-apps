@@ -32,7 +32,7 @@ import (
 	"github.com/klauspost/pgzip"
 )
 
-var Version = "fast-1.1.0"
+var Version = "dev"
 
 // =============================================================================
 // Configuration - Tuned for 9950X3D + NVMe

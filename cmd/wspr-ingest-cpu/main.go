@@ -35,7 +35,7 @@ import (
 )
 
 // Version is set at build time
-var Version = "cpu-1.1.0"
+var Version = "dev"
 
 // =============================================================================
 // Configuration

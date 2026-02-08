@@ -35,7 +35,7 @@ import (
 	"github.com/KI7MT/ki7mt-ai-lab-apps/internal/bands"
 )
 
-var Version = "2.2.0"
+var Version = "dev"
 
 const (
 	DefaultBatchSize = 100_000
@@ -281,11 +281,11 @@ func parseQSOLine(fields []string, myCall string) (*QSO, error) {
 	}, nil
 }
 
-// parseFile reads a Cabrillo log file and returns headers + QSOs.
-func parseFile(path, myCallOverride string) (*CabrilloHeaders, []*QSO, error) {
+// parseFile reads a Cabrillo log file and returns headers + QSOs + skipped count.
+func parseFile(path, myCallOverride string) (*CabrilloHeaders, []*QSO, int, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	defer file.Close()
 
@@ -351,14 +351,14 @@ func parseFile(path, myCallOverride string) (*CabrilloHeaders, []*QSO, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return headers, qsos, fmt.Errorf("scanner error: %w", err)
+		return headers, qsos, skipped, fmt.Errorf("scanner error: %w", err)
 	}
 
 	if skipped > 0 && len(qsos) == 0 {
-		return headers, nil, fmt.Errorf("all %d QSO lines failed to parse", skipped)
+		return headers, nil, skipped, fmt.Errorf("all %d QSO lines failed to parse", skipped)
 	}
 
-	return headers, qsos, nil
+	return headers, qsos, skipped, nil
 }
 
 // sourceKey derives a source identifier from a file path relative to srcDir.
@@ -371,6 +371,39 @@ func sourceKey(path, srcDir string) string {
 	// rel = cq-ww/2005cw/k1abc.log → want cq-ww/2005cw
 	dir := filepath.Dir(rel)
 	return dir
+}
+
+// RejectWriter appends failed file paths and error reasons to a reject log.
+// Thread-safe via mutex. If no path is configured, writes are silently discarded.
+type RejectWriter struct {
+	mu   sync.Mutex
+	file *os.File
+}
+
+func NewRejectWriter(path string) (*RejectWriter, error) {
+	if path == "" {
+		return &RejectWriter{}, nil
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("reject log: %w", err)
+	}
+	return &RejectWriter{file: f}, nil
+}
+
+func (rw *RejectWriter) Write(relPath, reason string) {
+	if rw.file == nil {
+		return
+	}
+	rw.mu.Lock()
+	defer rw.mu.Unlock()
+	fmt.Fprintf(rw.file, "%s | %s\n", relPath, reason)
+}
+
+func (rw *RejectWriter) Close() {
+	if rw.file != nil {
+		rw.file.Close()
+	}
 }
 
 // flushBatch sends the accumulated batch to ClickHouse.
@@ -436,19 +469,25 @@ func flushGrids(ctx context.Context, conn *ch.Client, entries []GridEntry) error
 }
 
 // processFile parses a single Cabrillo log and inserts QSOs using a shared connection.
-func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table string, batchSize int, enrich bool, stats *Stats) {
+func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table string, batchSize int, enrich bool, stats *Stats, rejectWriter *RejectWriter) {
 	fileName := filepath.Base(path)
 	src := sourceKey(path, srcDir)
+	relPath := filepath.Join(src, fileName)
 
-	headers, qsos, err := parseFile(path, "")
+	headers, qsos, skipped, err := parseFile(path, "")
+	if skipped > 0 {
+		stats.SkippedRows.Add(uint64(skipped))
+	}
 	if err != nil {
-		log.Printf("[%s] parse error: %v", fileName, err)
+		log.Printf("[%s] parse error: %v", relPath, err)
 		stats.FailedFiles.Add(1)
+		rejectWriter.Write(relPath, err.Error())
 		return
 	}
 
 	if len(qsos) == 0 {
 		stats.FailedFiles.Add(1)
+		rejectWriter.Write(relPath, "0 QSOs parsed")
 		return
 	}
 
@@ -483,7 +522,7 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 
 		if batch.Len() >= batchSize {
 			if err := flushBatch(ctx, conn, tableFQN, batch); err != nil {
-				log.Printf("[%s] flush error: %v", fileName, err)
+				log.Printf("[%s] flush error: %v", relPath, err)
 			}
 			batch.Reset()
 		}
@@ -492,7 +531,7 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	// Flush remainder
 	if batch.Len() > 0 {
 		if err := flushBatch(ctx, conn, tableFQN, batch); err != nil {
-			log.Printf("[%s] final flush error: %v", fileName, err)
+			log.Printf("[%s] final flush error: %v", relPath, err)
 		}
 		batch.Reset()
 	}
@@ -507,7 +546,7 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 			Grid:     headers.Grid,
 		}
 		if err := flushGrids(ctx, conn, []GridEntry{entry}); err != nil {
-			log.Printf("[%s] grid enrich error: %v", fileName, err)
+			log.Printf("[%s] grid enrich error: %v", relPath, err)
 		} else {
 			stats.GridsFound.Add(1)
 		}
@@ -515,7 +554,7 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 }
 
 // worker processes files from a channel using a persistent ClickHouse connection.
-func worker(ctx context.Context, id int, files <-chan string, srcDir, host, db, table string, batchSize int, enrich bool, stats *Stats, wg *sync.WaitGroup) {
+func worker(ctx context.Context, id int, files <-chan string, srcDir, host, db, table string, batchSize int, enrich bool, stats *Stats, rejectWriter *RejectWriter, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	conn, err := ch.Dial(ctx, ch.Options{
@@ -533,7 +572,7 @@ func worker(ctx context.Context, id int, files <-chan string, srcDir, host, db, 
 		if ctx.Err() != nil {
 			return
 		}
-		processFile(ctx, conn, path, srcDir, db, table, batchSize, enrich, stats)
+		processFile(ctx, conn, path, srcDir, db, table, batchSize, enrich, stats, rejectWriter)
 	}
 }
 
@@ -594,6 +633,7 @@ func main() {
 	batchSize := flag.Int("batch", DefaultBatchSize, "Rows per INSERT batch")
 	contest := flag.String("contest", "", "Process only this contest key (empty = all)")
 	enrich := flag.Bool("enrich", false, "Also insert GRID-LOCATOR into wspr.callsign_grid")
+	rejectLog := flag.String("reject-log", "", "Append failed files to this reject log (empty = disabled)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "contest-ingest v%s — Parse Cabrillo contest logs into ClickHouse\n\n", Version)
@@ -618,11 +658,20 @@ func main() {
 	log.Printf("Workers:  %d | Batch: %d", *workers, *batchSize)
 	log.Printf("CPUs:     %d", runtime.NumCPU())
 	log.Printf("Enrich:   %v", *enrich)
+	if *rejectLog != "" {
+		log.Printf("Reject:   %s", *rejectLog)
+	}
 	if *contest != "" {
 		log.Printf("Contest:  %s", *contest)
 	} else {
 		log.Printf("Contest:  all")
 	}
+
+	rejectWriter, err := NewRejectWriter(*rejectLog)
+	if err != nil {
+		log.Fatalf("Cannot open reject log: %v", err)
+	}
+	defer rejectWriter.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -666,7 +715,7 @@ func main() {
 
 	for i := 0; i < *workers; i++ {
 		wg.Add(1)
-		go worker(ctx, i, fileChan, *src, *host, *db, *table, *batchSize, *enrich, stats, &wg)
+		go worker(ctx, i, fileChan, *src, *host, *db, *table, *batchSize, *enrich, stats, rejectWriter, &wg)
 	}
 
 	for _, logPath := range files {
@@ -683,6 +732,7 @@ func main() {
 	totalRows := stats.TotalRows.Load()
 	totalFiles := stats.TotalFiles.Load()
 	failedFiles := stats.FailedFiles.Load()
+	skippedRows := stats.SkippedRows.Load()
 	gridsFound := stats.GridsFound.Load()
 
 	rps := float64(0)
@@ -696,13 +746,17 @@ func main() {
 	log.Println("=========================================================")
 	log.Printf("Files OK:       %d", totalFiles)
 	log.Printf("Files Failed:   %d", failedFiles)
-	log.Printf("Total QSOs:     %d", totalRows)
+	log.Printf("QSOs Inserted:  %d", totalRows)
+	log.Printf("QSOs Skipped:   %d", skippedRows)
 	log.Printf("Grids Enriched: %d", gridsFound)
 	log.Printf("Elapsed:        %v", elapsed.Round(time.Second))
 	if rps > 1_000_000 {
 		log.Printf("Throughput:     %.2f Mrps", rps/1_000_000)
 	} else {
 		log.Printf("Throughput:     %.0f rows/s", rps)
+	}
+	if *rejectLog != "" && failedFiles > 0 {
+		log.Printf("Reject log:     %s (%d entries)", *rejectLog, failedFiles)
 	}
 	log.Println("=========================================================")
 }

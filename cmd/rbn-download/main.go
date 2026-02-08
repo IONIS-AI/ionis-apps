@@ -29,7 +29,7 @@ import (
 )
 
 // Version can be overridden at build time via -ldflags
-var Version = "2.2.0"
+var Version = "dev"
 
 var userAgent = fmt.Sprintf("rbn-download/%s (ki7mt-ai-lab)", Version)
 

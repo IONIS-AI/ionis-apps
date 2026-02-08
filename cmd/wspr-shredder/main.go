@@ -38,7 +38,7 @@ import (
 )
 
 // Version can be overridden at build time via -ldflags
-var Version = "2.1.0"
+var Version = "dev"
 
 const (
 	ReadBufferSize = 1024 * 1024 // 1MB read buffer

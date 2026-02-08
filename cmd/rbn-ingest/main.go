@@ -39,7 +39,7 @@ import (
 	"github.com/KI7MT/ki7mt-ai-lab-apps/internal/bands"
 )
 
-var Version = "2.2.0"
+var Version = "dev"
 
 const (
 	DefaultBatchSize = 100_000
