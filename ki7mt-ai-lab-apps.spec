@@ -5,7 +5,7 @@
 %global goipath         github.com/KI7MT/ki7mt-ai-lab-apps
 
 Name:           ki7mt-ai-lab-apps
-Version:        2.2.0
+Version:        2.3.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -22,9 +22,10 @@ BuildRequires:  git
 BuildRequires:  make
 
 # Runtime requirements
-Requires:       ki7mt-ai-lab-core >= 2.0.0
+Requires:       ki7mt-ai-lab-core >= 2.3.0
 Requires:       %{name}-wspr = %{version}-%{release}
 Requires:       %{name}-solar = %{version}-%{release}
+Requires:       %{name}-contest = %{version}-%{release}
 
 %description
 High-performance Go applications for KI7MT AI Lab WSPR (Weak Signal
@@ -63,6 +64,19 @@ Solar and geomagnetic data processing applications:
 - solar-live-update:  Now-Casting live conditions updater (15-min cron)
 - solar-history-load: Historical solar data loader for training (6-hour cron)
 
+%package contest
+Summary:        Contest and RBN data processing tools
+Requires:       %{name} = %{version}-%{release}
+
+%description contest
+Contest log and Reverse Beacon Network data processing applications:
+- contest-download:  CQ/ARRL Cabrillo log downloader (rate-limited, hash-based)
+- contest-ingest:    Cabrillo V2/V3 parser → ClickHouse (225.7M QSOs from 475K files)
+- rbn-download:      RBN daily ZIP archive downloader (2009-present)
+- rbn-ingest:        RBN ZIP→CSV→ClickHouse ingester (2.18B rows in 3m32s)
+
+All ingestion tools use ch-go native protocol with LZ4 compression.
+
 %prep
 %autosetup -n %{name}-%{version}
 
@@ -92,7 +106,19 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/solar-live-update
 %{_bindir}/solar-history-load
 
+%files contest
+%{_bindir}/contest-download
+%{_bindir}/contest-ingest
+%{_bindir}/rbn-download
+%{_bindir}/rbn-ingest
+
 %changelog
+* Fri Feb 07 2026 Greg Beam <ki7mt@yahoo.com> - 2.3.0-1
+- Add contest subpackage: contest-download, contest-ingest, rbn-download, rbn-ingest
+- contest-ingest: Cabrillo V2/V3 parser, 225.7M QSOs from 475K files across 15 contests
+- rbn-ingest: RBN ZIP→CSV→ClickHouse, 2.18B rows in 3m32s (10.32 Mrps)
+- Align version across all lab packages at 2.3.0
+
 * Tue Feb 04 2026 Greg Beam <ki7mt@yahoo.com> - 2.2.0-1
 - Add solar-backfill: GFZ Potsdam historical SSN/SFI/Kp backfill (1932-present)
 - Add solar-backfill to RPM solar subpackage
