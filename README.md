@@ -10,38 +10,44 @@ This package provides command-line tools for ingesting and processing amateur ra
 
 ### WSPR Ingestion Tools
 
-| Command | Source Format | Throughput | Description |
-|---------|---------------|------------|-------------|
-| `wspr-turbo` | Compressed .gz | 24.67 Mrps | Zero-copy streaming from archives (champion) |
-| `wspr-shredder` | Uncompressed CSV | 21.81 Mrps | Fastest for pre-extracted CSV files |
-| `wspr-parquet-native` | Parquet | 17.02 Mrps | Native Go Parquet reader |
-| `wspr-ingest` | CSV | - | Standard CSV ingestion |
-| `wspr-ingest-cpu` | CSV | - | CPU-optimized CSV ingestion |
-| `wspr-ingest-fast` | Compressed .gz | - | Fast streaming ingestion |
-| `wspr-download` | - | - | Parallel archive downloader |
+```text
+Command               Source Format     Throughput    Description
+wspr-turbo            Compressed .gz    22.55 Mrps    Zero-copy streaming from archives (champion)
+wspr-shredder         Uncompressed CSV  21.81 Mrps    Fastest for pre-extracted CSV files
+wspr-parquet-native   Parquet           17.02 Mrps    Native Go Parquet reader
+wspr-ingest           CSV               -             Standard CSV ingestion
+wspr-ingest-cpu       CSV               -             CPU-optimized CSV ingestion
+wspr-ingest-fast      Compressed .gz    -             Fast streaming ingestion
+wspr-download         -                 -             Parallel archive downloader
+```
 
 **Band Normalization (v2.1.0)**: All CSV ingesters normalize the band column from the frequency field using `internal/bands.GetBand()`, producing correct ADIF band IDs (102-111 for HF). This fixes the legacy band encoding bug where raw CSV band values (MHz frequencies) were stored directly.
 
 ### Solar Tools
 
-| Command | Description |
-|---------|-------------|
-| `solar-ingest` | NOAA solar flux data ingestion into ClickHouse |
+```text
+Command            Description
+solar-ingest       NOAA solar flux data ingestion into ClickHouse
+solar-backfill     GFZ Potsdam historical SSN/SFI/Kp backfill
+solar-live-update  Real-time NOAA/SIDC solar updates (15-min cron)
+```
 
-## Benchmarks (Threadripper 9975WX, 10.8B rows, 24 workers)
+## Benchmarks (Threadripper 9975WX, 10.8B rows, 16 workers)
 
-| Tool | Source Size | Time | Throughput |
-|------|-------------|------|------------|
-| **wspr-turbo** | 185 GB (.gz) | **7m18s** | **24.67 Mrps** |
-| wspr-shredder | 878 GB (CSV) | 8m15s | 21.81 Mrps |
-| wspr-parquet-native | 109 GB (Parquet) | 9m39s | 17.02 Mrps |
+```text
+Tool                  Source Size        Time     Throughput
+wspr-turbo            185 GB (.gz)       ~8 min   22.55 Mrps
+wspr-shredder         878 GB (CSV)       8m15s    21.81 Mrps
+wspr-parquet-native   109 GB (Parquet)   9m39s    17.02 Mrps
+```
 
 ### End-to-End Pipeline Comparison
 
-| Pipeline | Total Time | Disk Written |
-|----------|------------|--------------|
-| **wspr-turbo streaming** | **7m18s** | **0 GB** |
-| pigz + wspr-shredder | 9m31s | 878 GB |
+```text
+Pipeline                 Total Time   Disk Written
+wspr-turbo streaming     ~8 min       0 GB
+pigz + wspr-shredder     9m31s        878 GB
+```
 
 ## Requirements
 
@@ -97,7 +103,7 @@ Stream directly from compressed archives - no intermediate disk I/O:
 wspr-turbo -source-dir /path/to/archives
 
 # Specify ClickHouse connection
-wspr-turbo -ch-host 192.168.1.100:9000 -ch-db wspr -ch-table spots \
+wspr-turbo -ch-host 192.168.1.100:9000 -ch-db wspr -ch-table bronze \
   -source-dir /path/to/archives
 ```
 

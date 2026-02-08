@@ -1,7 +1,7 @@
 // solar-backfill - Historical solar index backfill from GFZ Potsdam
 //
 // Downloads the definitive Kp/ap/Ap/SN/F10.7 dataset from GFZ Potsdam
-// and inserts into ClickHouse solar.indices_raw with 3-hour bucketing.
+// and inserts into ClickHouse solar.bronze with 3-hour bucketing.
 //
 // Source: https://kp.gfz-potsdam.de (Helmholtz Centre Potsdam, GFZ)
 // Format: Daily SSN + F10.7 (SFI) + 8x 3-hourly Kp/ap values per day
@@ -45,7 +45,7 @@ const (
 var bucketHours = [8]int{0, 3, 6, 9, 12, 15, 18, 21}
 
 // SolarBatch holds columnar data for native ClickHouse insert.
-// Matches schema: solar.indices_raw (date, time, observed_flux, adjusted_flux,
+// Matches schema: solar.bronze (date, time, observed_flux, adjusted_flux,
 // ssn, kp_index, ap_index, xray_short, xray_long, source_file)
 type SolarBatch struct {
 	Date         *proto.ColDate32
@@ -252,7 +252,7 @@ func flushBatch(ctx context.Context, conn *ch.Client, table string, batch *Solar
 func main() {
 	chHost := flag.String("ch-host", "127.0.0.1:9000", "ClickHouse native protocol address")
 	chDB := flag.String("ch-db", "solar", "ClickHouse database")
-	chTable := flag.String("ch-table", "indices_raw", "ClickHouse table")
+	chTable := flag.String("ch-table", "bronze", "ClickHouse table")
 	startStr := flag.String("start", "2020-01-01", "Start date (YYYY-MM-DD)")
 	endStr := flag.String("end", "", "End date (default: today)")
 	localFile := flag.String("file", "", "Local GFZ file (skip download)")
@@ -262,7 +262,7 @@ func main() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "solar-backfill v%s — Historical Solar Index Backfill (GFZ Potsdam)\n\n", Version)
 		fmt.Fprintf(os.Stderr, "Downloads SSN, SFI (F10.7), and 3-hourly Kp/ap from GFZ Potsdam\n")
-		fmt.Fprintf(os.Stderr, "and inserts into ClickHouse solar.indices_raw.\n\n")
+		fmt.Fprintf(os.Stderr, "and inserts into ClickHouse solar.bronze.\n\n")
 		fmt.Fprintf(os.Stderr, "Source: %s\n\n", gfzURL)
 		fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS]\n\n", os.Args[0])
 		flag.PrintDefaults()
@@ -471,5 +471,5 @@ func main() {
 	log.Printf("Source:  %s", sourceTag)
 	log.Println("=========================================================")
 	log.Println()
-	log.Println("Run OPTIMIZE TABLE solar.indices_raw FINAL to merge duplicates.")
+	log.Println("Run OPTIMIZE TABLE solar.bronze FINAL to merge duplicates.")
 }

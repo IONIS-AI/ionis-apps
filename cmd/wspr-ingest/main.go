@@ -50,7 +50,7 @@ const (
 var (
 	chHost    = flag.String("ch-host", "127.0.0.1:9000", "ClickHouse address")
 	chDB      = flag.String("ch-db", "wspr", "ClickHouse database")
-	chTable   = flag.String("ch-table", "spots", "ClickHouse table")
+	chTable   = flag.String("ch-table", "bronze", "ClickHouse table")
 	silent    = flag.Bool("silent", false, "Suppress progress output")
 )
 

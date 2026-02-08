@@ -376,7 +376,7 @@ func detectFormat(filePath string) string {
 func main() {
 	chHost := flag.String("ch-host", "127.0.0.1:9000", "ClickHouse address")
 	chDB := flag.String("ch-db", "solar", "ClickHouse database")
-	chTable := flag.String("ch-table", "indices_raw", "ClickHouse table")
+	chTable := flag.String("ch-table", "bronze", "ClickHouse table")
 	sourceDir := flag.String("source-dir", "/mnt/ai-stack/solar-data/raw", "Solar data source directory")
 	truncate := flag.Bool("truncate", false, "Truncate table before insert")
 

@@ -692,7 +692,7 @@ func processArchive(ctx context.Context, archivePath string, chHost, chDB, chTab
 func main() {
 	chHost := flag.String("ch-host", "127.0.0.1:9000", "ClickHouse address")
 	chDB := flag.String("ch-db", "wspr", "ClickHouse database")
-	chTable := flag.String("ch-table", "spots", "ClickHouse table")
+	chTable := flag.String("ch-table", "bronze", "ClickHouse table")
 	workers := flag.Int("workers", NumWorkers, "Parallel archive workers")
 	sourceDir := flag.String("source-dir", "/scratch/ai-stack/wspr-data/archives", "Archive source directory")
 	reportDir := flag.String("report-dir", "/mnt/ai-stack/wspr-data/reports-turbo", "Report output directory")

@@ -388,7 +388,7 @@ func truncatePartition(ctx context.Context, conn *ch.Client, table, filePath str
 func main() {
 	chHost := flag.String("ch-host", "127.0.0.1:9000", "ClickHouse address")
 	chDB := flag.String("ch-db", "wspr", "ClickHouse database")
-	chTable := flag.String("ch-table", "spots", "ClickHouse table")
+	chTable := flag.String("ch-table", "bronze", "ClickHouse table")
 	workers := flag.Int("workers", NumWorkers, "Number of parallel file workers")
 	sourceDir := flag.String("source-dir", "/scratch/ai-stack/wspr-data/csv", "Default CSV source directory")
 	reportDir := flag.String("report-dir", "/mnt/ai-stack/wspr-data/reports-shredder", "Report output directory")

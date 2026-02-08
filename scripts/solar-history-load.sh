@@ -9,7 +9,7 @@
 #   1. Optionally downloads fresh 7-day X-ray, 7-day Kp, 30-day SFI from NOAA
 #   2. Aggregates 1-minute X-ray flux into 3-hour buckets (max per bucket)
 #   3. Merges Kp (already 3-hourly) and daily SFI into the same time grid
-#   4. Inserts into solar.indices_raw (additive, uses ReplacingMergeTree dedup)
+#   4. Inserts into solar.bronze (additive, uses ReplacingMergeTree dedup)
 #
 # Data sources:
 #   - GOES X-ray flux (7 days, 1-min): services.swpc.noaa.gov
@@ -158,12 +158,12 @@ printf "  Expanded to %s SFI rows (8 per day)\n" "$SFI_ROWS"
 MIN_DATE=$(jq -r '.[0].time_tag[:10]' "$XRAY_FILE")
 MAX_DATE=$(jq -r '.[-1].time_tag[:10]' "$XRAY_FILE")
 
-printf "[%s] Clearing solar.indices_raw for %s to %s (source: goes_xray_7day.json, noaa_kp_7day.json, noaa_sfi_30day.json)...\n" \
+printf "[%s] Clearing solar.bronze for %s to %s (source: goes_xray_7day.json, noaa_kp_7day.json, noaa_sfi_30day.json)...\n" \
     "$(date '+%Y-%m-%d %H:%M:%S')" "$MIN_DATE" "$MAX_DATE"
 
 # Delete old ingested data from these sources to avoid duplicates
 clickhouse-client --query "
-    ALTER TABLE solar.indices_raw DELETE
+    ALTER TABLE solar.bronze DELETE
     WHERE source_file IN ('goes_xray_7day.json', 'noaa_kp_7day.json', 'noaa_sfi_30day.json')
 "
 
@@ -173,26 +173,26 @@ sleep 2
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. Insert all data
 # ─────────────────────────────────────────────────────────────────────────────
-printf "[%s] Inserting data into solar.indices_raw...\n" "$(date '+%Y-%m-%d %H:%M:%S')"
+printf "[%s] Inserting data into solar.bronze...\n" "$(date '+%Y-%m-%d %H:%M:%S')"
 
 # Format: date, time, observed_flux, adjusted_flux, ssn, kp_index, ap_index, source_file, xray_short, xray_long
 INSERT_COLS="date, time, observed_flux, adjusted_flux, ssn, kp_index, ap_index, source_file, xray_short, xray_long"
 
 # Insert X-ray data
 if [[ -n "$XRAY_CSV" ]]; then
-    printf "%s\n" "$XRAY_CSV" | clickhouse-client --query "INSERT INTO solar.indices_raw ($INSERT_COLS) FORMAT TabSeparated"
+    printf "%s\n" "$XRAY_CSV" | clickhouse-client --query "INSERT INTO solar.bronze ($INSERT_COLS) FORMAT TabSeparated"
     printf "  Inserted %s X-ray rows\n" "$XRAY_ROWS"
 fi
 
 # Insert Kp data
 if [[ -n "$KP_CSV" ]]; then
-    printf "%s\n" "$KP_CSV" | clickhouse-client --query "INSERT INTO solar.indices_raw ($INSERT_COLS) FORMAT TabSeparated"
+    printf "%s\n" "$KP_CSV" | clickhouse-client --query "INSERT INTO solar.bronze ($INSERT_COLS) FORMAT TabSeparated"
     printf "  Inserted %s Kp rows\n" "$KP_ROWS"
 fi
 
 # Insert SFI data
 if [[ -n "$SFI_CSV" ]]; then
-    printf "%s\n" "$SFI_CSV" | clickhouse-client --query "INSERT INTO solar.indices_raw ($INSERT_COLS) FORMAT TabSeparated"
+    printf "%s\n" "$SFI_CSV" | clickhouse-client --query "INSERT INTO solar.bronze ($INSERT_COLS) FORMAT TabSeparated"
     printf "  Inserted %s SFI rows\n" "$SFI_ROWS"
 fi
 
@@ -210,7 +210,7 @@ clickhouse-client --query "
         max(kp_index) AS max_kp,
         max(xray_long) AS max_xray,
         max(observed_flux) AS max_sfi
-    FROM solar.indices_raw
+    FROM solar.bronze
     WHERE date >= '$MIN_DATE' AND date <= '$MAX_DATE'
     GROUP BY date
     ORDER BY date

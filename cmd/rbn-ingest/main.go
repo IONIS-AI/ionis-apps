@@ -1,7 +1,7 @@
 // rbn-ingest - Stream RBN daily ZIP archives into ClickHouse via native protocol
 //
 // Reads daily ZIP files from /mnt/rbn-data/{year}/*.zip, parses the CSV inside
-// each ZIP, normalizes band via bands.GetBand(), and inserts into rbn.spots_raw
+// each ZIP, normalizes band via bands.GetBand(), and inserts into rbn.bronze
 // using ch-go native protocol with LZ4 compression.
 //
 // Handles three RBN CSV format eras:
@@ -55,7 +55,7 @@ type Stats struct {
 	StartTime     time.Time
 }
 
-// RBNBatch holds columnar data for a batch INSERT into rbn.spots_raw.
+// RBNBatch holds columnar data for a batch INSERT into rbn.bronze.
 type RBNBatch struct {
 	Timestamp *proto.ColDateTime
 	DeCall    *proto.ColStr
@@ -393,7 +393,7 @@ func main() {
 	src := flag.String("src", "/mnt/rbn-data", "Source directory with {year}/*.zip")
 	host := flag.String("host", "192.168.1.90:9000", "ClickHouse host:port")
 	db := flag.String("db", "rbn", "ClickHouse database")
-	table := flag.String("table", "spots_raw", "ClickHouse table")
+	table := flag.String("table", "bronze", "ClickHouse table")
 	workers := flag.Int("workers", DefaultWorkers, "Parallel ZIP workers")
 	batchSize := flag.Int("batch", DefaultBatchSize, "Rows per INSERT batch")
 	year := flag.Int("year", 0, "Process only this year (0 = all)")

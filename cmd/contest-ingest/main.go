@@ -2,7 +2,7 @@
 //
 // Walks /mnt/contest-logs/{contest}/{yearmode}/*.log, parses Cabrillo headers
 // and QSO lines, normalizes band via bands.GetBand(), and batch INSERTs into
-// contest.qsos using ch-go native protocol with LZ4 compression.
+// contest.bronze using ch-go native protocol with LZ4 compression.
 //
 // Optionally extracts GRID-LOCATOR headers and enriches wspr.callsign_grid.
 //
@@ -82,7 +82,7 @@ type QSO struct {
 	Source    string
 }
 
-// ContestBatch holds columnar data for a batch INSERT into contest.qsos.
+// ContestBatch holds columnar data for a batch INSERT into contest.bronze.
 type ContestBatch struct {
 	Timestamp *proto.ColDateTime
 	Frequency *proto.ColUInt32
@@ -589,7 +589,7 @@ func main() {
 	src := flag.String("src", "/mnt/contest-logs", "Source directory with {contest}/{yearmode}/*.log")
 	host := flag.String("host", "192.168.1.90:9000", "ClickHouse host:port")
 	db := flag.String("db", "contest", "ClickHouse database")
-	table := flag.String("table", "qsos", "ClickHouse table")
+	table := flag.String("table", "bronze", "ClickHouse table")
 	workers := flag.Int("workers", DefaultWorkers, "Parallel file workers")
 	batchSize := flag.Int("batch", DefaultBatchSize, "Rows per INSERT batch")
 	contest := flag.String("contest", "", "Process only this contest key (empty = all)")

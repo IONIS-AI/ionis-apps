@@ -5,7 +5,7 @@
 %global goipath         github.com/KI7MT/ki7mt-ai-lab-apps
 
 Name:           ki7mt-ai-lab-apps
-Version:        2.3.0
+Version:        2.3.1
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -113,6 +113,11 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/rbn-ingest
 
 %changelog
+* Sat Feb 08 2026 Greg Beam <ki7mt@yahoo.com> - 2.3.1-1
+- Medallion architecture: all defaults target 'bronze' table
+- Update benchmarks: wspr-turbo 22.55 Mrps with 16 workers (production config)
+- Update README: convert tables to code blocks for COPR, add solar-backfill
+
 * Sat Feb 07 2026 Greg Beam <ki7mt@yahoo.com> - 2.3.0-1
 - Add contest subpackage: contest-download, contest-ingest, rbn-download, rbn-ingest
 - contest-ingest: Cabrillo V2/V3 parser, 225.7M QSOs from 475K files across 15 contests

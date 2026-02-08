@@ -323,7 +323,7 @@ func processFile(ctx context.Context, filePath string, chHost, chDB, chTable str
 func main() {
 	chHost := flag.String("ch-host", "127.0.0.1:9000", "ClickHouse address")
 	chDB := flag.String("ch-db", "wspr", "ClickHouse database")
-	chTable := flag.String("ch-table", "spots", "ClickHouse table")
+	chTable := flag.String("ch-table", "bronze", "ClickHouse table")
 	workers := flag.Int("workers", NumWorkers, "Number of parallel file workers")
 	sourceDir := flag.String("source-dir", "/scratch/ai-stack/wspr-data/parquet", "Default Parquet source directory")
 	reportDir := flag.String("report-dir", "/mnt/ai-stack/wspr-data/reports-parquet-native", "Report output directory")
