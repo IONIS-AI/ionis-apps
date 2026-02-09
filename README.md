@@ -6,7 +6,7 @@ Part of the [IONIS](https://github.com/KI7MT/ki7mt-ai-lab-docs) (Ionospheric Neu
 
 ## Overview
 
-Command-line tools for ingesting and processing amateur radio propagation data from multiple sources: WSPR, Reverse Beacon Network, contest logs (CQ/ARRL), and NOAA solar indices. All ingestion tools use the ch-go native ClickHouse protocol with LZ4 compression for maximum throughput.
+Command-line tools for ingesting and processing amateur radio propagation data from multiple sources: WSPR, Reverse Beacon Network, contest logs (CQ/ARRL), PSK Reporter, and NOAA solar indices. All ingestion tools use the ch-go native ClickHouse protocol with LZ4 compression for maximum throughput. The PSK Reporter MQTT collector writes to disk (gzip JSONL) for durability and replayability.
 
 **Current version:** 2.3.1
 
@@ -38,6 +38,12 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 | `rbn-download` | Downloads daily RBN ZIP archives (2009–present) |
 | `rbn-ingest` | Ingests RBN CSV into ClickHouse (10.32 Mrps) |
 
+### PSK Reporter Tools
+
+| Command | Description |
+|---------|-------------|
+| `pskr-collector` | MQTT real-time spot collector → gzip JSONL (~250 spots/sec HF) |
+
 ### Solar Tools
 
 | Command | Description |
@@ -62,6 +68,7 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 | RBN | 2.18B spots | `rbn-ingest` | 10.32 Mrps, 3m32s |
 | Contest Logs | 195M QSOs | `contest-ingest` | 258K rps, 12m37s |
 | Solar Indices | 76K rows | `solar-backfill` | 2.88M rps |
+| PSK Reporter | ~22M/day (collecting) | `pskr-collector` | ~250 HF spots/sec |
 
 ### Data Quality
 
@@ -123,6 +130,9 @@ make wspr
 
 # Build Solar tools only
 make solar
+
+# Build PSK Reporter tools only
+make pskr
 
 # Show help
 make help

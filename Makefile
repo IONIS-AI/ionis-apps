@@ -10,7 +10,7 @@
 #   make clean        # Remove build artifacts
 
 SHELL := /bin/bash
-.PHONY: help all build install uninstall test clean lint fmt vet wspr solar contest
+.PHONY: help all build install uninstall test clean lint fmt vet wspr solar contest pskr
 
 # =============================================================================
 # Package Metadata
@@ -53,8 +53,9 @@ DISTDIR      := dist
 WSPR_CMDS    := wspr-shredder wspr-turbo wspr-parquet-native wspr-download
 SOLAR_CMDS   := solar-ingest solar-download solar-backfill
 CONTEST_CMDS := contest-download rbn-download rbn-ingest contest-ingest
+PSKR_CMDS    := pskr-collector
 UTIL_CMDS    := db-validate
-ALL_CMDS     := $(WSPR_CMDS) $(SOLAR_CMDS) $(CONTEST_CMDS) $(UTIL_CMDS)
+ALL_CMDS     := $(WSPR_CMDS) $(SOLAR_CMDS) $(CONTEST_CMDS) $(PSKR_CMDS) $(UTIL_CMDS)
 
 # Shell scripts to install
 SOLAR_SCRIPTS := solar-refresh.sh solar-live-update.sh solar-history-load.sh
@@ -88,6 +89,9 @@ help:
 	@printf "  rbn-ingest           RBN ZIP→CSV→ClickHouse ingester\n"
 	@printf "  contest-ingest       Cabrillo log→ClickHouse ingester\n"
 	@printf "\n"
+	@printf "PSK Reporter Tools:\n"
+	@printf "  pskr-collector       MQTT real-time spot collector\n"
+	@printf "\n"
 	@printf "Utility Tools:\n"
 	@printf "  db-validate          Validate ClickHouse table row counts\n"
 	@printf "\n"
@@ -99,6 +103,7 @@ help:
 	@printf "  wspr          Build WSPR binaries only\n"
 	@printf "  solar         Build Solar binaries only\n"
 	@printf "  contest       Build Contest binaries only\n"
+	@printf "  pskr          Build PSK Reporter binaries only\n"
 	@printf "  install       Install to system (PREFIX=$(PREFIX))\n"
 	@printf "  uninstall     Remove installed files\n"
 	@printf "  test          Run Go tests\n"
@@ -137,6 +142,10 @@ solar: $(addprefix $(BINDIR_BUILD)/,$(SOLAR_CMDS))
 contest: $(addprefix $(BINDIR_BUILD)/,$(CONTEST_CMDS))
 	@printf "\nContest tools built:\n"
 	@for cmd in $(CONTEST_CMDS); do printf "  $(BINDIR_BUILD)/$$cmd\n"; done
+
+pskr: $(addprefix $(BINDIR_BUILD)/,$(PSKR_CMDS))
+	@printf "\nPSK Reporter tools built:\n"
+	@for cmd in $(PSKR_CMDS); do printf "  $(BINDIR_BUILD)/$$cmd\n"; done
 
 # Generic build rule for all commands
 $(BINDIR_BUILD)/%: cmd/%/main.go | $(BINDIR_BUILD)
