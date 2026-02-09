@@ -54,12 +54,18 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 
 ## Data Pipeline Summary
 
+**Total dataset: 13.18B+ observations** — the largest curated amateur radio propagation dataset in existence.
+
 | Source | Volume | Tool | Throughput |
 |--------|--------|------|------------|
 | WSPR | 10.8B spots | `wspr-turbo` | 22.55 Mrps, 7m27s |
 | RBN | 2.18B spots | `rbn-ingest` | 10.32 Mrps, 3m32s |
 | Contest Logs | 195M QSOs | `contest-ingest` | 258K rps, 12m37s |
 | Solar Indices | 76K rows | `solar-backfill` | 2.88M rps |
+
+### Data Quality
+
+WSPR balloon/telemetry contamination (2.56% of spots) is identified and filtered at the ClickHouse layer via `wspr.balloon_callsigns` (see [ki7mt-ai-lab-core](https://github.com/KI7MT/ki7mt-ai-lab-core)). Pico balloon trackers (Type 2 telemetry) encode GPS coordinates as synthetic callsigns — these are flagged by velocity analysis (>=45 grids/day), Rosetta Stone exclusion, and reserved prefix detection. V14+ model training uses `wspr.signatures_v2_terrestrial` which excludes all flagged callsigns.
 
 ## Benchmarks (Threadripper 9975WX, 16 workers)
 
