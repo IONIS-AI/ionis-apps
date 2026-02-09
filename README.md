@@ -1,53 +1,104 @@
 # ki7mt-ai-lab-apps
 
-High-performance Go applications for KI7MT AI Lab WSPR/Solar data processing.
+High-performance Go data ingesters for the KI7MT Sovereign AI Lab.
+
+Part of the [IONIS](https://github.com/KI7MT/ki7mt-ai-lab-docs) (Ionospheric Neural Inference System) project.
 
 ## Overview
 
-This package provides command-line tools for ingesting and processing amateur radio propagation data from WSPR (Weak Signal Propagation Reporter) and NOAA solar indices. All ingestion tools use the ch-go native ClickHouse protocol with LZ4 compression for maximum throughput.
+Command-line tools for ingesting and processing amateur radio propagation data from multiple sources: WSPR, Reverse Beacon Network, contest logs (CQ/ARRL), and NOAA solar indices. All ingestion tools use the ch-go native ClickHouse protocol with LZ4 compression for maximum throughput.
+
+**Current version:** 2.3.1
 
 ## Applications
 
-### WSPR Ingestion Tools
+### WSPR Tools
 
-```text
-Command               Source Format     Throughput    Description
-wspr-turbo            Compressed .gz    22.55 Mrps    Zero-copy streaming from archives (champion)
-wspr-shredder         Uncompressed CSV  21.81 Mrps    Fastest for pre-extracted CSV files
-wspr-parquet-native   Parquet           17.02 Mrps    Native Go Parquet reader
-wspr-ingest           CSV               -             Standard CSV ingestion
-wspr-ingest-cpu       CSV               -             CPU-optimized CSV ingestion
-wspr-ingest-fast      Compressed .gz    -             Fast streaming ingestion
-wspr-download         -                 -             Parallel archive downloader
-```
+| Command | Source Format | Throughput | Description |
+|---------|--------------|------------|-------------|
+| `wspr-turbo` | Compressed .gz | 22.55 Mrps | Zero-copy streaming from archives |
+| `wspr-shredder` | Uncompressed CSV | 21.81 Mrps | Fastest for pre-extracted CSV |
+| `wspr-parquet-native` | Parquet | 17.02 Mrps | Native Go Parquet reader |
+| `wspr-ingest` | CSV | — | Standard CSV ingestion |
+| `wspr-ingest-cpu` | CSV | — | CPU-optimized CSV ingestion |
+| `wspr-ingest-fast` | Compressed .gz | — | Fast streaming ingestion |
+| `wspr-download` | — | — | Parallel archive downloader |
 
-**Band Normalization (v2.1.0)**: All CSV ingesters normalize the band column from the frequency field using `internal/bands.GetBand()`, producing correct ADIF band IDs (102-111 for HF). This fixes the legacy band encoding bug where raw CSV band values (MHz frequencies) were stored directly.
+### Contest Tools
+
+| Command | Description |
+|---------|-------------|
+| `contest-download` | Downloads public Cabrillo logs (CQ WW, WPX, ARRL DX, and 12 other contests) |
+| `contest-ingest` | Parses and ingests Cabrillo v1/v2/v3 into ClickHouse (258K rps) |
+
+### RBN Tools
+
+| Command | Description |
+|---------|-------------|
+| `rbn-download` | Downloads daily RBN ZIP archives (2009–present) |
+| `rbn-ingest` | Ingests RBN CSV into ClickHouse (10.32 Mrps) |
 
 ### Solar Tools
 
-```text
-Command            Description
-solar-ingest       NOAA solar flux data ingestion into ClickHouse
-solar-backfill     GFZ Potsdam historical SSN/SFI/Kp backfill
-solar-live-update  Real-time NOAA/SIDC solar updates (15-min cron)
+| Command | Description |
+|---------|-------------|
+| `solar-ingest` | NOAA solar flux data ingestion |
+| `solar-backfill` | GFZ Potsdam historical SSN/SFI/Kp (2000–present) |
+| `solar-download` | NOAA/SIDC solar data downloader |
+
+### Utility Tools
+
+| Command | Description |
+|---------|-------------|
+| `db-validate` | ClickHouse schema and data validation |
+
+## Data Pipeline Summary
+
+| Source | Volume | Tool | Throughput |
+|--------|--------|------|------------|
+| WSPR | 10.8B spots | `wspr-turbo` | 22.55 Mrps, 7m27s |
+| RBN | 2.18B spots | `rbn-ingest` | 10.32 Mrps, 3m32s |
+| Contest Logs | 195M QSOs | `contest-ingest` | 258K rps, 12m37s |
+| Solar Indices | 76K rows | `solar-backfill` | 2.88M rps |
+
+## Benchmarks (Threadripper 9975WX, 16 workers)
+
+| Tool | Source Size | Time | Throughput |
+|------|-----------|------|------------|
+| `wspr-turbo` | 185 GB (.gz) | ~8 min | 22.55 Mrps |
+| `wspr-shredder` | 878 GB (CSV) | 8m15s | 21.81 Mrps |
+| `wspr-parquet-native` | 109 GB (Parquet) | 9m39s | 17.02 Mrps |
+| `rbn-ingest` | 21 GB (6,183 ZIPs) | 3m32s | 10.32 Mrps |
+| `contest-ingest` | 3 GB (407K files) | 12m37s | 258K rps |
+
+## Band Normalization (v2.1.0+)
+
+All CSV ingesters normalize the band column from the frequency field using `internal/bands.GetBand()`, producing correct ADIF band IDs (102–111 for HF). This fixed the legacy band encoding bug where raw CSV frequency values were stored as band IDs.
+
+## Architecture
+
+### wspr-turbo Pipeline
+
+```
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  .csv.gz file   │────▶│  Stream Decomp   │────▶│  Vectorized     │
+│  (on disk)      │     │  (klauspost/gzip)│     │  CSV Parser     │
+└─────────────────┘     └──────────────────┘     └────────┬────────┘
+                                                          │
+                                                          ▼
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  ClickHouse     │◀────│  ch-go Native    │◀────│  Double Buffer  │
+│                 │     │  Blocks + LZ4    │     │  Fill A/Send B  │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
 ```
 
-## Benchmarks (Threadripper 9975WX, 10.8B rows, 16 workers)
+### Contest Parser
 
-```text
-Tool                  Source Size        Time     Throughput
-wspr-turbo            185 GB (.gz)       ~8 min   22.55 Mrps
-wspr-shredder         878 GB (CSV)       8m15s    21.81 Mrps
-wspr-parquet-native   109 GB (Parquet)   9m39s    17.02 Mrps
-```
-
-### End-to-End Pipeline Comparison
-
-```text
-Pipeline                 Total Time   Disk Written
-wspr-turbo streaming     ~8 min       0 GB
-pigz + wspr-shredder     9m31s        878 GB
-```
+Handles Cabrillo v1, v2, and v3 formats with known edge cases:
+- NBSP (0xA0) padding from CTESTWIN/UcxLog/N1MM
+- HHMMSS 6-digit time from some loggers
+- MM/DD/YYYY dates from old v1 Cabrillo (2005 era)
+- Grid extraction from `HQ-GRID-LOCATOR` headers (160K callsign→grid mappings)
 
 ## Requirements
 
@@ -73,92 +124,33 @@ make help
 
 ## Installation
 
-```bash
-# Install to /usr/bin
-sudo make install
-
-# Or stage for packaging
-DESTDIR=/tmp/stage make install
-```
-
-## COPR Installation (Fedora/RHEL/Rocky)
+### From COPR (Recommended)
 
 ```bash
-# Enable COPR repository
 sudo dnf copr enable ki7mt/ai-lab
-
-# Install packages
 sudo dnf install ki7mt-ai-lab-apps-wspr
 sudo dnf install ki7mt-ai-lab-apps-solar
 ```
 
-## Usage Examples
-
-### wspr-turbo (Recommended for archived data)
-
-Stream directly from compressed archives - no intermediate disk I/O:
+### From Source
 
 ```bash
-# Ingest all .gz files from directory
-wspr-turbo -source-dir /path/to/archives
-
-# Specify ClickHouse connection
-wspr-turbo -ch-host 192.168.1.100:9000 -ch-db wspr -ch-table bronze \
-  -source-dir /path/to/archives
+sudo make install
 ```
 
-### wspr-shredder (Fastest for pre-extracted CSV)
+## Related Repositories
 
-```bash
-# Ingest uncompressed CSV files
-wspr-shredder -source-dir /path/to/csv
-
-# With custom workers
-wspr-shredder -workers 16 -source-dir /path/to/csv
-```
-
-### wspr-parquet-native (For Parquet sources)
-
-```bash
-# Ingest Parquet files
-wspr-parquet-native -source-dir /path/to/parquet
-```
-
-## Architecture
-
-### wspr-turbo Pipeline
-
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  .csv.gz file   │────▶│  Stream Decomp   │────▶│  Vectorized     │
-│  (on disk)      │     │  (klauspost/gzip)│     │  CSV Parser     │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
-                                                          │
-                                                          ▼
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  ClickHouse     │◀────│  ch-go Native    │◀────│  Double Buffer  │
-│                 │     │  Blocks + LZ4    │     │  Fill A/Send B  │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
-```
-
-**Key Features:**
-- **Stream Decompress**: klauspost/gzip (ASM-optimized)
-- **Vectorized Parse**: Columnar buffers, no row structs
-- **Double-Buffer**: Fill block A while sending block B
-- **Zero-Alloc**: sync.Pool for 1M-row ColumnBlocks
-- **Native Protocol**: Binary wire format with LZ4
-
-## Performance Tuning
-
-- **Workers**: 16 optimal for 64 GB RAM (each worker uses ~4 GB)
-- **Block Size**: 1M rows per native block
-- **I/O Separation**: Best performance with source on separate device from ClickHouse
-- **Memory**: sync.Pool holds ~56 GB of buffers at 16 workers
+| Repository | Purpose |
+|------------|---------|
+| [ki7mt-ai-lab-core](https://github.com/KI7MT/ki7mt-ai-lab-core) | DDL schemas, SQL scripts |
+| [ki7mt-ai-lab-cuda](https://github.com/KI7MT/ki7mt-ai-lab-cuda) | CUDA signature embedding engine |
+| [ki7mt-ai-lab-training](https://github.com/KI7MT/ki7mt-ai-lab-training) | PyTorch model training |
+| [ki7mt-ai-lab-docs](https://github.com/KI7MT/ki7mt-ai-lab-docs) | Documentation site |
 
 ## License
 
-GPL-3.0-or-later
+GPL-3.0-or-later — See [COPYING](COPYING)
 
 ## Author
 
-Greg Beam, KI7MT - ki7mt@outlook.com
+Greg Beam, KI7MT
