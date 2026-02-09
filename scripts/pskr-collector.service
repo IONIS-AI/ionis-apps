@@ -1,0 +1,50 @@
+# pskr-collector.service — PSK Reporter MQTT real-time spot collector
+#
+# Subscribes to the PSK Reporter MQTT feed and writes hourly-rotated
+# gzip JSONL files to /mnt/pskr-data/YYYY/MM/DD/spots-HHMMSS.jsonl.gz
+#
+# Install:
+#   sudo cp pskr-collector.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now pskr-collector
+#
+# Logs:
+#   journalctl -u pskr-collector -f
+#
+# PSK Reporter created by Philip Gladstone, N1DQ.
+# MQTT feed provided by Tom Sevart, M0LTE.
+
+[Unit]
+Description=PSK Reporter MQTT Spot Collector
+Documentation=https://pskreporter.info
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ki7mt
+Group=ki7mt
+
+ExecStart=/usr/bin/pskr-collector \
+    --broker mqtt.pskreporter.info:1883 \
+    --outdir /mnt/pskr-data \
+    --rotate 1h \
+    --hf-only=true \
+    --stats 60s
+
+Restart=on-failure
+RestartSec=30
+
+# Graceful shutdown — flush buffers before exit
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/mnt/pskr-data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
