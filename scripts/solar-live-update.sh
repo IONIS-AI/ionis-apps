@@ -108,10 +108,14 @@ if (( $(echo "$XRAY_LONG > 0.00001" | bc -l 2>/dev/null) )); then
     CONDITIONS="$CONDITIONS + Radio Blackout"
 fi
 
-# Update ClickHouse live_conditions table
+# Update ClickHouse live_conditions table (Memory engine — recreate if lost after restart)
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Updating live_conditions: Kp=$KP_INDEX, SFI=$SOLAR_FLUX, X-ray=$XRAY_LONG, $CONDITIONS"
 
 clickhouse-client --query "
+    CREATE TABLE IF NOT EXISTS wspr.live_conditions (
+        kp_index Float32, ap_index Float32, solar_flux Float32,
+        xray_short Float64, xray_long Float64, conditions String
+    ) ENGINE = Memory;
     TRUNCATE TABLE wspr.live_conditions;
     INSERT INTO wspr.live_conditions (kp_index, ap_index, solar_flux, xray_short, xray_long, conditions)
     VALUES ($KP_INDEX, $AP_INDEX, $SOLAR_FLUX, $XRAY_SHORT, $XRAY_LONG, '$CONDITIONS');
