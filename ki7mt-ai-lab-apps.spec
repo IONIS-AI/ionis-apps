@@ -77,6 +77,16 @@ Contest log and Reverse Beacon Network data processing applications:
 
 All ingestion tools use ch-go native protocol with LZ4 compression.
 
+%package pskr
+Summary:        PSK Reporter real-time data collector
+Requires:       %{name} = %{version}-%{release}
+
+%description pskr
+PSK Reporter MQTT real-time spot collector:
+- pskr-collector:  MQTT subscriber for live FT8/FT4/CW/WSPR spots (~300 spots/sec)
+                   Writes gzip JSONL to disk with hourly rotation.
+                   Forward-only collection from mqtt.pskreporter.info.
+
 %prep
 %autosetup -n %{name}-%{version}
 
@@ -113,8 +123,16 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/rbn-download
 %{_bindir}/rbn-ingest
 
+%files pskr
+%{_bindir}/pskr-collector
+
 %changelog
-* Sat Feb 08 2026 Greg Beam <ki7mt@yahoo.com> - 2.3.1-1
+* Tue Feb 10 2026 Greg Beam <ki7mt@yahoo.com> - 2.3.2-1
+- Version sweep: sync all hardcoded versions across scripts and sources
+- Fix solar-live-update: auto-create Memory table after ClickHouse restart
+- Add pskr subpackage for pskr-collector binary
+
+* Sun Feb 08 2026 Greg Beam <ki7mt@yahoo.com> - 2.3.1-1
 - Medallion architecture: all defaults target 'bronze' table
 - Update benchmarks: wspr-turbo 22.55 Mrps with 16 workers (production config)
 - Update README: convert tables to code blocks for COPR, add solar-backfill
