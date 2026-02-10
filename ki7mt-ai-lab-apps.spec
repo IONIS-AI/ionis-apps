@@ -5,7 +5,7 @@
 %global goipath         github.com/KI7MT/ki7mt-ai-lab-apps
 
 Name:           ki7mt-ai-lab-apps
-Version:        2.3.1
+Version:        2.3.2
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 

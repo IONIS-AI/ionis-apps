@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	Version    = "1.0.0"
+	Version    = "2.3.2"
 	NumWorkers = 16
 )
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # Name............: solar-live-update
-# Version.........: 1.0.0
+# Version.........: 2.3.2
 # Description.....: Update live_conditions table for Now-Casting
 # Usage...........: solar-live-update [--refresh]
 #

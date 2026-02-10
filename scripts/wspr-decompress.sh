@@ -6,14 +6,14 @@
 #          Uses pigz (parallel gzip) for maximum throughput
 #
 # Author:  KI7MT AI Lab
-# Version: 1.0.0
+# Version: 2.3.2
 #
 # Dependencies: pigz (preferred) or gzip + GNU parallel
 #------------------------------------------------------------------------------
 
 set -euo pipefail
 
-readonly SCRIPT_VERSION="1.0.0"
+readonly SCRIPT_VERSION="2.3.2"
 readonly DEFAULT_DIR="/mnt/ai-stack/wspr-data/raw"
 
 # Color codes

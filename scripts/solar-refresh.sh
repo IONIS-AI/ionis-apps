@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # Name............: solar-refresh
-# Version.........: 2.0.5
+# Version.........: 2.3.2
 # Description.....: Download and ingest solar/geomagnetic data
 # Usage...........: solar-refresh [OPTIONS]
 #
@@ -14,7 +14,7 @@
 # =============================================================================
 set -e
 
-VERSION="2.0.5"
+VERSION="2.3.2"
 SOLAR_DATA_DIR="${SOLAR_DATA_DIR:-/mnt/ai-stack/solar-data/raw}"
 
 usage() {

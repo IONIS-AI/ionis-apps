@@ -6,14 +6,14 @@
 #          Handles malformed rows gracefully with ignore_errors
 #
 # Author:  KI7MT AI Lab
-# Version: 1.0.0
+# Version: 2.3.2
 #
 # Dependencies: duckdb
 #------------------------------------------------------------------------------
 
 set -euo pipefail
 
-readonly SCRIPT_VERSION="1.0.0"
+readonly SCRIPT_VERSION="2.3.2"
 DEFAULT_CSV_SRC="/scratch/ai-stack/wspr-data/csv"
 DEFAULT_PARQUET_DEST="/scratch/ai-stack/wspr-data/parquet"
 DEFAULT_THREADS=32

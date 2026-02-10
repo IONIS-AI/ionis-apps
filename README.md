@@ -8,7 +8,7 @@ Part of the [IONIS](https://github.com/KI7MT/ki7mt-ai-lab-docs) (Ionospheric Neu
 
 Command-line tools for ingesting and processing amateur radio propagation data from multiple sources: WSPR, Reverse Beacon Network, contest logs (CQ/ARRL), PSK Reporter, and NOAA solar indices. All ingestion tools use the ch-go native ClickHouse protocol with LZ4 compression for maximum throughput. The PSK Reporter MQTT collector writes to disk (gzip JSONL) for durability and replayability.
 
-**Current version:** 2.3.1
+**Current version:** 2.3.2
 
 ## Applications
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
 # Name............: solar-history-load
-# Version.........: 1.0.0
+# Version.........: 2.3.2
 # Description.....: Load historical solar data (X-ray, Kp, SFI) into ClickHouse
 # Usage...........: solar-history-load [--download]
 #
