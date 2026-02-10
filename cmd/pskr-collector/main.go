@@ -404,7 +404,7 @@ func main() {
 	// MQTT client setup
 	mqttClientID := *clientID
 	if mqttClientID == "" {
-		mqttClientID = fmt.Sprintf("ki7mt-pskr-%d", time.Now().UnixNano()%100000)
+		mqttClientID = fmt.Sprintf("ki7mt-ionis-pskr-collector-v%s", Version)
 	}
 
 	topicFilter := *topic
