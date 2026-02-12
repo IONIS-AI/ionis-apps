@@ -53,7 +53,7 @@ DISTDIR      := dist
 WSPR_CMDS    := wspr-shredder wspr-turbo wspr-parquet-native wspr-download
 SOLAR_CMDS   := solar-ingest solar-download solar-backfill
 CONTEST_CMDS := contest-download rbn-download rbn-ingest contest-ingest
-PSKR_CMDS    := pskr-collector
+PSKR_CMDS    := pskr-collector pskr-ingest
 UTIL_CMDS    := db-validate
 ALL_CMDS     := $(WSPR_CMDS) $(SOLAR_CMDS) $(CONTEST_CMDS) $(PSKR_CMDS) $(UTIL_CMDS)
 
@@ -91,6 +91,7 @@ help:
 	@printf "\n"
 	@printf "PSK Reporter Tools:\n"
 	@printf "  pskr-collector       MQTT real-time spot collector\n"
+	@printf "  pskr-ingest          JSONL→ClickHouse incremental ingester\n"
 	@printf "\n"
 	@printf "Utility Tools:\n"
 	@printf "  db-validate          Validate ClickHouse table row counts\n"
