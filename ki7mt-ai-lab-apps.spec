@@ -5,7 +5,7 @@
 %global goipath         github.com/KI7MT/ki7mt-ai-lab-apps
 
 Name:           ki7mt-ai-lab-apps
-Version:        2.3.2
+Version:        2.4.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -33,7 +33,7 @@ Propagation Reporter) and Solar flux data processing. Optimized for
 10+ billion row datasets with ClickHouse backend.
 
 Ingestion tools use ch-go native protocol with LZ4 compression for
-maximum throughput. Benchmarks on Ryzen 9 9950X3D:
+maximum throughput. Benchmarks on Threadripper 9975WX:
 - wspr-shredder: 14.4 Mrps (uncompressed CSV)
 - wspr-turbo: 8.8 Mrps (streaming from .gz archives)
 - wspr-parquet-native: 8.4 Mrps (Parquet files)
@@ -82,10 +82,12 @@ Summary:        PSK Reporter real-time data collector
 Requires:       %{name} = %{version}-%{release}
 
 %description pskr
-PSK Reporter MQTT real-time spot collector:
+PSK Reporter data collection and ingestion tools:
 - pskr-collector:  MQTT subscriber for live FT8/FT4/CW/WSPR spots (~300 spots/sec)
                    Writes gzip JSONL to disk with hourly rotation.
                    Forward-only collection from mqtt.pskreporter.info.
+- pskr-ingest:     Incremental JSONL→ClickHouse loader with watermark tracking.
+                   Uses pskr.ingest_log for safe cron-based loading.
 
 %prep
 %autosetup -n %{name}-%{version}
@@ -125,8 +127,15 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 
 %files pskr
 %{_bindir}/pskr-collector
+%{_bindir}/pskr-ingest
 
 %changelog
+* Tue Feb 11 2026 Greg Beam <ki7mt@yahoo.com> - 2.4.0-1
+- V20 production release
+- Add pskr-ingest: incremental JSONL→ClickHouse loader with watermark tracking
+- Add pskr-ingest to pskr subpackage
+- Fix hardware ref: Ryzen 9 9950X3D → Threadripper 9975WX
+
 * Tue Feb 10 2026 Greg Beam <ki7mt@yahoo.com> - 2.3.2-1
 - Version sweep: sync all hardcoded versions across scripts and sources
 - Fix solar-live-update: auto-create Memory table after ClickHouse restart
