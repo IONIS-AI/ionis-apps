@@ -1,15 +1,17 @@
 #!/bin/bash
 # =============================================================================
 # Name............: solar-history-load
-# Version.........: 2.3.2
-# Description.....: Load historical solar data (X-ray, Kp, SFI) into ClickHouse
+# Version.........: 3.0.0
+# Description.....: Load NOAA SWPC solar data into ClickHouse solar.bronze
 # Usage...........: solar-history-load [--download]
 #
 # This script:
 #   1. Optionally downloads fresh 7-day X-ray, 7-day Kp, 30-day SFI from NOAA
 #   2. Aggregates 1-minute X-ray flux into 3-hour buckets (max per bucket)
 #   3. Merges Kp (already 3-hourly) and daily SFI into the same time grid
-#   4. Inserts into solar.bronze (additive, uses ReplacingMergeTree dedup)
+#   4. Inserts 3 streams into a temp staging table, then merges via
+#      GROUP BY (date, time) + max() before inserting into solar.bronze.
+#      This prevents ReplacingMergeTree from collapsing partial rows.
 #
 # Data sources:
 #   - GOES X-ray flux (7 days, 1-min): services.swpc.noaa.gov
@@ -152,66 +154,105 @@ SFI_ROWS=$(printf "%s\n" "$SFI_CSV" | wc -l)
 printf "  Expanded to %s SFI rows (8 per day)\n" "$SFI_ROWS"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. Delete existing data for the date range and reload
+# 5. Stage all 3 streams into a temp table
 # ─────────────────────────────────────────────────────────────────────────────
-# Get date range from X-ray data
-MIN_DATE=$(jq -r '.[0].time_tag[:10]' "$XRAY_FILE")
-MAX_DATE=$(jq -r '.[-1].time_tag[:10]' "$XRAY_FILE")
+# solar.bronze uses ReplacingMergeTree ORDER BY (date, time). Inserting 3
+# partial rows per (date, time) key would collapse to 1 row after merge,
+# losing 2 of 3 streams. Instead: stage → GROUP BY merge → single insert.
 
-printf "[%s] Clearing solar.bronze for %s to %s (source: goes_xray_7day.json, noaa_kp_7day.json, noaa_sfi_30day.json)...\n" \
-    "$(date '+%Y-%m-%d %H:%M:%S')" "$MIN_DATE" "$MAX_DATE"
+STAGING_TABLE="solar._tmp_history_load"
 
-# Delete old ingested data from these sources to avoid duplicates
+printf "[%s] Creating staging table %s...\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$STAGING_TABLE"
+
+clickhouse-client --query "DROP TABLE IF EXISTS $STAGING_TABLE"
 clickhouse-client --query "
-    ALTER TABLE solar.bronze DELETE
-    WHERE source_file IN ('goes_xray_7day.json', 'noaa_kp_7day.json', 'noaa_sfi_30day.json')
+    CREATE TABLE $STAGING_TABLE (
+        date Date32,
+        time DateTime,
+        observed_flux Float32 DEFAULT 0,
+        adjusted_flux Float32 DEFAULT 0,
+        ssn Float32 DEFAULT 0,
+        kp_index Float32 DEFAULT 0,
+        ap_index Float32 DEFAULT 0,
+        source_file LowCardinality(String),
+        xray_short Float32 DEFAULT 0,
+        xray_long Float32 DEFAULT 0
+    ) ENGINE = MergeTree ORDER BY (date, time)
 "
 
-# Wait for mutations to complete
-sleep 2
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 6. Insert all data
-# ─────────────────────────────────────────────────────────────────────────────
-printf "[%s] Inserting data into solar.bronze...\n" "$(date '+%Y-%m-%d %H:%M:%S')"
-
-# Format: date, time, observed_flux, adjusted_flux, ssn, kp_index, ap_index, source_file, xray_short, xray_long
 INSERT_COLS="date, time, observed_flux, adjusted_flux, ssn, kp_index, ap_index, source_file, xray_short, xray_long"
 
-# Insert X-ray data
+# Insert X-ray data into staging
 if [[ -n "$XRAY_CSV" ]]; then
-    printf "%s\n" "$XRAY_CSV" | clickhouse-client --query "INSERT INTO solar.bronze ($INSERT_COLS) FORMAT TabSeparated"
-    printf "  Inserted %s X-ray rows\n" "$XRAY_ROWS"
+    printf "%s\n" "$XRAY_CSV" | clickhouse-client --query "INSERT INTO $STAGING_TABLE ($INSERT_COLS) FORMAT TabSeparated"
+    printf "  Staged %s X-ray rows\n" "$XRAY_ROWS"
 fi
 
-# Insert Kp data
+# Insert Kp data into staging
 if [[ -n "$KP_CSV" ]]; then
-    printf "%s\n" "$KP_CSV" | clickhouse-client --query "INSERT INTO solar.bronze ($INSERT_COLS) FORMAT TabSeparated"
-    printf "  Inserted %s Kp rows\n" "$KP_ROWS"
+    printf "%s\n" "$KP_CSV" | clickhouse-client --query "INSERT INTO $STAGING_TABLE ($INSERT_COLS) FORMAT TabSeparated"
+    printf "  Staged %s Kp rows\n" "$KP_ROWS"
 fi
 
-# Insert SFI data
+# Insert SFI data into staging
 if [[ -n "$SFI_CSV" ]]; then
-    printf "%s\n" "$SFI_CSV" | clickhouse-client --query "INSERT INTO solar.bronze ($INSERT_COLS) FORMAT TabSeparated"
-    printf "  Inserted %s SFI rows\n" "$SFI_ROWS"
+    printf "%s\n" "$SFI_CSV" | clickhouse-client --query "INSERT INTO $STAGING_TABLE ($INSERT_COLS) FORMAT TabSeparated"
+    printf "  Staged %s SFI rows\n" "$SFI_ROWS"
 fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. Merge streams and insert into solar.bronze
+# ─────────────────────────────────────────────────────────────────────────────
+# GROUP BY (date, time) + max() produces one complete row per key with all
+# 3 streams combined. source_file is set to 'noaa_swpc_7day' since the merged
+# row contains data from all 3 NOAA feeds.
+
+printf "[%s] Merging staged data and inserting into solar.bronze...\n" "$(date '+%Y-%m-%d %H:%M:%S')"
+
+MERGED_ROWS=$(clickhouse-client --query "SELECT count() FROM (SELECT date, time FROM $STAGING_TABLE GROUP BY date, time)")
+
+clickhouse-client --query "
+    INSERT INTO solar.bronze (date, time, observed_flux, adjusted_flux, ssn, kp_index, ap_index, source_file, xray_short, xray_long)
+    SELECT
+        date, time,
+        max(observed_flux),
+        max(adjusted_flux),
+        max(ssn),
+        max(kp_index),
+        max(ap_index),
+        'noaa_swpc_7day',
+        max(xray_short),
+        max(xray_long)
+    FROM $STAGING_TABLE
+    GROUP BY date, time
+"
+
+printf "  Inserted %s merged rows into solar.bronze\n" "$MERGED_ROWS"
+
+# Clean up staging table
+clickhouse-client --query "DROP TABLE IF EXISTS $STAGING_TABLE"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Verify
 # ─────────────────────────────────────────────────────────────────────────────
-printf "\n[%s] Verification:\n" "$(date '+%Y-%m-%d %H:%M:%S')"
+MIN_DATE=$(jq -r '.[0].time_tag[:10]' "$XRAY_FILE")
+MAX_DATE=$(jq -r '.[-1].time_tag[:10]' "$XRAY_FILE")
+
+printf "\n[%s] Verification (NOAA 7-day range: %s to %s):\n" "$(date '+%Y-%m-%d %H:%M:%S')" "$MIN_DATE" "$MAX_DATE"
 
 clickhouse-client --query "
     SELECT
         date,
-        countIf(kp_index > 0) AS kp_rows,
-        countIf(xray_long > 0) AS xray_rows,
-        countIf(observed_flux > 0) AS sfi_rows,
+        count() AS rows,
+        countIf(kp_index > 0) AS has_kp,
+        countIf(xray_long > 0) AS has_xray,
+        countIf(observed_flux > 0) AS has_sfi,
         max(kp_index) AS max_kp,
         max(xray_long) AS max_xray,
         max(observed_flux) AS max_sfi
-    FROM solar.bronze
-    WHERE date >= '$MIN_DATE' AND date <= '$MAX_DATE'
+    FROM solar.bronze FINAL
+    WHERE source_file = 'noaa_swpc_7day'
+      AND date >= '$MIN_DATE' AND date <= '$MAX_DATE'
     GROUP BY date
     ORDER BY date
     FORMAT PrettyCompact
