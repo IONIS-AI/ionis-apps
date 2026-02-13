@@ -36,7 +36,7 @@ import (
 
 	"github.com/ClickHouse/ch-go"
 	"github.com/ClickHouse/ch-go/proto"
-	"github.com/KI7MT/ki7mt-ai-lab-apps/internal/bands"
+	"github.com/IONIS-AI/ionis-apps/internal/bands"
 )
 
 var Version = "dev"

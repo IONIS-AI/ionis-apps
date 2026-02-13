@@ -15,7 +15,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VERSION_FILE="$SCRIPT_DIR/VERSION"
-SPEC_FILE="$SCRIPT_DIR/ki7mt-ai-lab-apps.spec"
+SPEC_FILE="$SCRIPT_DIR/ionis-apps.spec"
 
 usage() {
     printf "Usage: %s <new-version> [--push]\n" "$(basename "$0")"

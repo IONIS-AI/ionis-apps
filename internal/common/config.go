@@ -1,4 +1,4 @@
-// Package common provides shared utilities for KI7MT AI Lab applications.
+// Package common provides shared utilities for IONIS applications.
 package common
 
 import (
@@ -25,7 +25,7 @@ func DefaultConfig() *Config {
 		ClickHouseDatabase: getEnv("CLICKHOUSE_DATABASE", "wspr"),
 		ClickHouseUser:     getEnv("CLICKHOUSE_USER", "default"),
 		ClickHousePassword: getEnv("CLICKHOUSE_PASSWORD", ""),
-		DataDir:            getEnv("KI7MT_DATA_DIR", "/var/lib/ki7mt-ai-lab"),
+		DataDir:            getEnv("IONIS_DATA_DIR", "/var/lib/ionis"),
 		LogLevel:           getEnv("LOG_LEVEL", "info"),
 	}
 }

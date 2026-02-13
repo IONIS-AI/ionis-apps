@@ -2,19 +2,22 @@
 %global debug_package %{nil}
 
 # Go import path
-%global goipath         github.com/KI7MT/ki7mt-ai-lab-apps
+%global goipath         github.com/IONIS-AI/ionis-apps
 
-Name:           ki7mt-ai-lab-apps
-Version:        2.4.0
+Name:           ionis-apps
+Version:        3.0.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
 License:        GPL-3.0-or-later
-URL:            https://github.com/KI7MT/ki7mt-ai-lab-apps
-Source0:        https://github.com/KI7MT/%{name}/archive/refs/tags/v%{version}.tar.gz#/%{name}-%{version}.tar.gz
+URL:            https://github.com/IONIS-AI/ionis-apps
+Source0:        https://github.com/IONIS-AI/%{name}/archive/refs/tags/v%{version}.tar.gz#/%{name}-%{version}.tar.gz
 
 # Architecture-specific (Go compiles to native binaries)
 ExclusiveArch:  x86_64 aarch64
+
+Obsoletes:      ki7mt-ai-lab-apps < 3.0.0
+Provides:       ki7mt-ai-lab-apps
 
 # Build requirements
 BuildRequires:  golang >= 1.22
@@ -22,13 +25,13 @@ BuildRequires:  git
 BuildRequires:  make
 
 # Runtime requirements
-Requires:       ki7mt-ai-lab-core >= 2.3.0
+Requires:       ionis-core >= 3.0.0
 Requires:       %{name}-wspr = %{version}-%{release}
 Requires:       %{name}-solar = %{version}-%{release}
 Requires:       %{name}-contest = %{version}-%{release}
 
 %description
-High-performance Go applications for KI7MT AI Lab WSPR (Weak Signal
+High-performance Go applications for IONIS WSPR (Weak Signal
 Propagation Reporter) and Solar flux data processing. Optimized for
 10+ billion row datasets with ClickHouse backend.
 
@@ -130,7 +133,14 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/pskr-ingest
 
 %changelog
-* Tue Feb 11 2026 Greg Beam <ki7mt@yahoo.com> - 2.4.0-1
+* Fri Feb 13 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.0-1
+- Rename package: ki7mt-ai-lab-apps → ionis-apps
+- Move to IONIS-AI GitHub org
+- Update Go module path: github.com/IONIS-AI/ionis-apps
+- Require ionis-core >= 3.0.0
+- Add Obsoletes/Provides for seamless RPM upgrade
+
+* Wed Feb 11 2026 Greg Beam <ki7mt@yahoo.com> - 2.4.0-1
 - V20 production release
 - Add pskr-ingest: incremental JSONL→ClickHouse loader with watermark tracking
 - Add pskr-ingest to pskr subpackage

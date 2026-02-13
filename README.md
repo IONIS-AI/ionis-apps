@@ -1,14 +1,10 @@
-# ki7mt-ai-lab-apps
+# ionis-apps
 
-High-performance Go data ingesters for the KI7MT Sovereign AI Lab.
-
-Part of the [IONIS](https://github.com/KI7MT/ki7mt-ai-lab-docs) (Ionospheric Neural Inference System) project.
+High-performance Go data ingesters for the IONIS project.
 
 ## Overview
 
 Command-line tools for ingesting and processing amateur radio propagation data from multiple sources: WSPR, Reverse Beacon Network, contest logs (CQ/ARRL), PSK Reporter, and NOAA solar indices. All ingestion tools use the ch-go native ClickHouse protocol with LZ4 compression for maximum throughput. The PSK Reporter MQTT collector writes to disk (gzip JSONL) for durability and replayability.
-
-**Current version:** 2.3.2
 
 ## Applications
 
@@ -19,9 +15,6 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 | `wspr-turbo` | Compressed .gz | 22.55 Mrps | Zero-copy streaming from archives |
 | `wspr-shredder` | Uncompressed CSV | 21.81 Mrps | Fastest for pre-extracted CSV |
 | `wspr-parquet-native` | Parquet | 17.02 Mrps | Native Go Parquet reader |
-| `wspr-ingest` | CSV | — | Standard CSV ingestion |
-| `wspr-ingest-cpu` | CSV | — | CPU-optimized CSV ingestion |
-| `wspr-ingest-fast` | Compressed .gz | — | Fast streaming ingestion |
 | `wspr-download` | — | — | Parallel archive downloader |
 
 ### Contest Tools
@@ -35,7 +28,7 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 
 | Command | Description |
 |---------|-------------|
-| `rbn-download` | Downloads daily RBN ZIP archives (2009–present) |
+| `rbn-download` | Downloads daily RBN ZIP archives (2009-present) |
 | `rbn-ingest` | Ingests RBN CSV into ClickHouse (10.32 Mrps) |
 
 ### PSK Reporter Tools
@@ -43,13 +36,14 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 | Command | Description |
 |---------|-------------|
 | `pskr-collector` | MQTT real-time spot collector → gzip JSONL (~250 spots/sec HF) |
+| `pskr-ingest` | Incremental JSONL→ClickHouse loader with watermark tracking |
 
 ### Solar Tools
 
 | Command | Description |
 |---------|-------------|
 | `solar-ingest` | NOAA solar flux data ingestion |
-| `solar-backfill` | GFZ Potsdam historical SSN/SFI/Kp (2000–present) |
+| `solar-backfill` | GFZ Potsdam historical SSN/SFI/Kp (2000-present) |
 | `solar-download` | NOAA/SIDC solar data downloader |
 
 ### Utility Tools
@@ -70,72 +64,24 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 | Solar Indices | 76K rows | `solar-backfill` | 2.88M rps |
 | PSK Reporter | ~22M/day (collecting) | `pskr-collector` | ~250 HF spots/sec |
 
-### Data Quality
-
-WSPR balloon/telemetry contamination (2.56% of spots) is identified and filtered at the ClickHouse layer via `wspr.balloon_callsigns` (see [ki7mt-ai-lab-core](https://github.com/KI7MT/ki7mt-ai-lab-core)). Pico balloon trackers (Type 2 telemetry) encode GPS coordinates as synthetic callsigns — these are flagged by velocity analysis (>=45 grids/day), Rosetta Stone exclusion, and reserved prefix detection. V14+ model training uses `wspr.signatures_v2_terrestrial` which excludes all flagged callsigns.
-
-## Benchmarks (Threadripper 9975WX, 16 workers)
-
-| Tool | Source Size | Time | Throughput |
-|------|-----------|------|------------|
-| `wspr-turbo` | 185 GB (.gz) | ~8 min | 22.55 Mrps |
-| `wspr-shredder` | 878 GB (CSV) | 8m15s | 21.81 Mrps |
-| `wspr-parquet-native` | 109 GB (Parquet) | 9m39s | 17.02 Mrps |
-| `rbn-ingest` | 21 GB (6,183 ZIPs) | 3m32s | 10.32 Mrps |
-| `contest-ingest` | 3 GB (407K files) | 12m37s | 258K rps |
-
 ## Band Normalization (v2.1.0+)
 
-All CSV ingesters normalize the band column from the frequency field using `internal/bands.GetBand()`, producing correct ADIF band IDs (102–111 for HF). This fixed the legacy band encoding bug where raw CSV frequency values were stored as band IDs.
-
-## Architecture
-
-### wspr-turbo Pipeline
-
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  .csv.gz file   │────▶│  Stream Decomp   │────▶│  Vectorized     │
-│  (on disk)      │     │  (klauspost/gzip)│     │  CSV Parser     │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
-                                                          │
-                                                          ▼
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  ClickHouse     │◀────│  ch-go Native    │◀────│  Double Buffer  │
-│                 │     │  Blocks + LZ4    │     │  Fill A/Send B  │
-└─────────────────┘     └──────────────────┘     └─────────────────┘
-```
-
-### Contest Parser
-
-Handles Cabrillo v1, v2, and v3 formats with known edge cases:
-- NBSP (0xA0) padding from CTESTWIN/UcxLog/N1MM
-- HHMMSS 6-digit time from some loggers
-- MM/DD/YYYY dates from old v1 Cabrillo (2005 era)
-- Grid extraction from `HQ-GRID-LOCATOR` headers (160K callsign→grid mappings)
+All CSV ingesters normalize the band column from the frequency field using `internal/bands.GetBand()`, producing correct ADIF band IDs (102-111 for HF).
 
 ## Requirements
 
 - Go 1.24+
 - ClickHouse server
-- ki7mt-ai-lab-core (database schemas)
+- ionis-core (database schemas)
 
 ## Building
 
 ```bash
-# Build all binaries
-make all
-
-# Build WSPR tools only
-make wspr
-
-# Build Solar tools only
-make solar
-
-# Build PSK Reporter tools only
-make pskr
-
-# Show help
-make help
+make all       # Build all binaries
+make wspr      # Build WSPR tools only
+make solar     # Build Solar tools only
+make pskr      # Build PSK Reporter tools only
+make help      # Show help
 ```
 
 ## Installation
@@ -143,9 +89,18 @@ make help
 ### From COPR (Recommended)
 
 ```bash
-sudo dnf copr enable ki7mt/ai-lab
-sudo dnf install ki7mt-ai-lab-apps-wspr
-sudo dnf install ki7mt-ai-lab-apps-solar
+sudo dnf copr enable ki7mt/ionis-ai
+sudo dnf install ionis-apps-wspr
+sudo dnf install ionis-apps-solar
+```
+
+### Upgrading from ki7mt-ai-lab-apps
+
+The `ionis-apps` package includes `Obsoletes: ki7mt-ai-lab-apps` for seamless upgrade:
+
+```bash
+sudo dnf copr enable ki7mt/ionis-ai
+sudo dnf upgrade --refresh
 ```
 
 ### From Source
@@ -158,10 +113,10 @@ sudo make install
 
 | Repository | Purpose |
 |------------|---------|
-| [ki7mt-ai-lab-core](https://github.com/KI7MT/ki7mt-ai-lab-core) | DDL schemas, SQL scripts |
-| [ki7mt-ai-lab-cuda](https://github.com/KI7MT/ki7mt-ai-lab-cuda) | CUDA signature embedding engine |
-| [ki7mt-ai-lab-training](https://github.com/KI7MT/ki7mt-ai-lab-training) | PyTorch model training |
-| [ki7mt-ai-lab-docs](https://github.com/KI7MT/ki7mt-ai-lab-docs) | Documentation site |
+| [ionis-core](https://github.com/IONIS-AI/ionis-core) | DDL schemas, SQL scripts |
+| [ionis-cuda](https://github.com/IONIS-AI/ionis-cuda) | CUDA signature embedding engine |
+| [ionis-training](https://github.com/IONIS-AI/ionis-training) | PyTorch model training |
+| [ionis-docs](https://github.com/IONIS-AI/ionis-docs) | Documentation site |
 
 ## License
 

@@ -5,7 +5,7 @@
 # Purpose: Convert WSPR CSV files to Parquet format using DuckDB
 #          Handles malformed rows gracefully with ignore_errors
 #
-# Author:  KI7MT AI Lab
+# Author:  IONIS-AI
 # Version: 2.3.2
 #
 # Dependencies: duckdb

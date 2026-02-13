@@ -5,7 +5,7 @@
 # Purpose: Decompress all *.csv.gz files in parallel to saturate I/O
 #          Uses pigz (parallel gzip) for maximum throughput
 #
-# Author:  KI7MT AI Lab
+# Author:  IONIS-AI
 # Version: 2.3.2
 #
 # Dependencies: pigz (preferred) or gzip + GNU parallel

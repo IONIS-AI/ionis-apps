@@ -1,4 +1,4 @@
-module github.com/KI7MT/ki7mt-ai-lab-apps
+module github.com/IONIS-AI/ionis-apps
 
 go 1.24.9
 

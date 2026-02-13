@@ -36,7 +36,7 @@ import (
 // Version can be overridden at build time via -ldflags
 var Version = "dev"
 
-var userAgent = fmt.Sprintf("contest-download/%s (ki7mt-ai-lab)", Version)
+var userAgent = fmt.Sprintf("contest-download/%s (ionis-apps)", Version)
 
 // Contest defines a contest data source.
 type Contest struct {

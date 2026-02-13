@@ -1,6 +1,6 @@
-# Makefile for ki7mt-ai-lab-apps
+# Makefile for ionis-apps
 #
-# High-performance Go applications for KI7MT AI Lab WSPR/Solar data processing
+# High-performance Go applications for IONIS WSPR/Solar data processing
 #
 # Usage:
 #   make              # Show help
@@ -15,7 +15,7 @@ SHELL := /bin/bash
 # =============================================================================
 # Package Metadata
 # =============================================================================
-NAME        := ki7mt-ai-lab-apps
+NAME        := ionis-apps
 VERSION     := $(shell cat VERSION 2>/dev/null || echo "0.0.0")
 GIT_COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE  := $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -68,7 +68,7 @@ SOLAR_SCRIPTS := solar-refresh.sh solar-live-update.sh solar-history-load.sh
 help:
 	@printf "\n"
 	@printf "┌─────────────────────────────────────────────────────────────────┐\n"
-	@printf "│  ki7mt-ai-lab-apps v$(VERSION)                                     │\n"
+	@printf "│  ionis-apps v$(VERSION)                                              │\n"
 	@printf "│  High-Performance WSPR/Solar Data Ingestion Tools              │\n"
 	@printf "└─────────────────────────────────────────────────────────────────┘\n"
 	@printf "\n"
