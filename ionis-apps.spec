@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        3.0.0
+Version:        3.0.1
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -29,6 +29,7 @@ Requires:       ionis-core >= 3.0.0
 Requires:       %{name}-wspr = %{version}-%{release}
 Requires:       %{name}-solar = %{version}-%{release}
 Requires:       %{name}-contest = %{version}-%{release}
+Requires:       %{name}-pskr = %{version}-%{release}
 
 %description
 High-performance Go applications for IONIS WSPR (Weak Signal
@@ -44,6 +45,8 @@ maximum throughput. Benchmarks on Threadripper 9975WX:
 %package wspr
 Summary:        WSPR data processing tools
 Requires:       %{name} = %{version}-%{release}
+Obsoletes:      ki7mt-ai-lab-apps-wspr < 3.0.0
+Provides:       ki7mt-ai-lab-apps-wspr = %{version}-%{release}
 
 %description wspr
 WSPR (Weak Signal Propagation Reporter) data processing applications:
@@ -58,6 +61,8 @@ All ingestion tools use ch-go native protocol with LZ4 compression.
 %package solar
 Summary:        Solar flux data processing tools
 Requires:       %{name} = %{version}-%{release}
+Obsoletes:      ki7mt-ai-lab-apps-solar < 3.0.0
+Provides:       ki7mt-ai-lab-apps-solar = %{version}-%{release}
 
 %description solar
 Solar and geomagnetic data processing applications:
@@ -70,6 +75,8 @@ Solar and geomagnetic data processing applications:
 %package contest
 Summary:        Contest and RBN data processing tools
 Requires:       %{name} = %{version}-%{release}
+Obsoletes:      ki7mt-ai-lab-apps-contest < 3.0.0
+Provides:       ki7mt-ai-lab-apps-contest = %{version}-%{release}
 
 %description contest
 Contest log and Reverse Beacon Network data processing applications:
@@ -133,6 +140,10 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/pskr-ingest
 
 %changelog
+* Thu Feb 13 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.1-1
+- Add Obsoletes/Provides to wspr, solar, contest subpackages for seamless upgrade
+- Add pskr subpackage to main package Requires (was missing from install)
+
 * Fri Feb 13 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.0-1
 - Rename package: ki7mt-ai-lab-apps → ionis-apps
 - Move to IONIS-AI GitHub org
