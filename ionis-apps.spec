@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        3.0.1
+Version:        3.0.2
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -140,6 +140,10 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/pskr-ingest
 
 %changelog
+* Thu Feb 13 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.2-1
+- Fix solar-history-load: temp-table merge prevents ReplacingMergeTree stream loss
+- Three NOAA streams (X-ray, Kp, SFI) now merged via GROUP BY before bronze insert
+
 * Thu Feb 13 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.1-1
 - Add Obsoletes/Provides to wspr, solar, contest subpackages for seamless upgrade
 - Add pskr subpackage to main package Requires (was missing from install)
