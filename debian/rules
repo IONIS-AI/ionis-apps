@@ -4,6 +4,7 @@ export CGO_ENABLED = 0
 export GOFLAGS = -mod=vendor
 export GOPATH = $(CURDIR)/.gopath
 export GOCACHE = $(CURDIR)/.gocache
+export GOTOOLCHAIN = local
 
 VERSION := $(shell cat VERSION)
 
