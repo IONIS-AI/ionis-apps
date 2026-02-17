@@ -1,0 +1,6 @@
+usr/bin/solar-ingest
+usr/bin/solar-download
+usr/bin/solar-backfill
+usr/bin/solar-refresh
+usr/bin/solar-live-update
+usr/bin/solar-history-load

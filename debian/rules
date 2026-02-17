@@ -1,0 +1,18 @@
+#!/usr/bin/make -f
+
+export CGO_ENABLED = 0
+export GOFLAGS = -mod=vendor
+
+VERSION := $(shell cat VERSION)
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	$(MAKE) all VERSION=$(VERSION)
+
+override_dh_auto_install:
+	$(MAKE) install DESTDIR=$(CURDIR)/debian/tmp PREFIX=/usr
+
+override_dh_auto_test:
+	$(MAKE) vet

@@ -9,13 +9,15 @@ set -e
 # This script:
 #   1. Updates the VERSION file
 #   2. Updates the spec file Version: line
-#   3. Commits the changes
-#   4. Creates a git tag (vX.Y.Z format)
-#   5. (with --push) Pushes commits and tags to origin and github
+#   3. Updates debian/changelog (if dch is available)
+#   4. Commits the changes
+#   5. Creates a git tag (vX.Y.Z format)
+#   6. (with --push) Pushes commits and tags to origin and github
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VERSION_FILE="$SCRIPT_DIR/VERSION"
 SPEC_FILE="$SCRIPT_DIR/ionis-apps.spec"
+DEB_CHANGELOG="$SCRIPT_DIR/debian/changelog"
 
 usage() {
     printf "Usage: %s <new-version> [--push]\n" "$(basename "$0")"
@@ -77,8 +79,15 @@ if [[ -f "$SPEC_FILE" ]]; then
     printf "Updated spec file to %s\n" "$NEW_VERSION"
 fi
 
+# Update debian/changelog (if dch is available)
+if command -v dch >/dev/null 2>&1 && [[ -f "$DEB_CHANGELOG" ]]; then
+    dch -v "${NEW_VERSION}-1" -D noble "New upstream release ${NEW_VERSION}"
+    printf "Updated debian/changelog to %s-1\n" "$NEW_VERSION"
+fi
+
 # Stage and commit
 git add "$VERSION_FILE" "$SPEC_FILE"
+[[ -f "$DEB_CHANGELOG" ]] && git add "$DEB_CHANGELOG"
 git commit -m "v${NEW_VERSION}: version bump"
 
 # Create tag

@@ -1,0 +1,10 @@
+ionis-apps (3.0.2-1) noble; urgency=medium
+
+  * Initial Debian packaging (dual COPR + PPA)
+  * WSPR ingesters: wspr-turbo, wspr-shredder, wspr-parquet-native
+  * Solar pipeline: solar-ingest, solar-download, solar-backfill
+  * Contest/RBN: contest-download, contest-ingest, rbn-download, rbn-ingest
+  * PSK Reporter: pskr-collector, pskr-ingest
+  * Matches RPM ionis-apps-3.0.2-1
+
+ -- Greg Beam <ki7mt@yahoo.com>  Mon, 17 Feb 2026 12:00:00 +0000

@@ -1,0 +1,58 @@
+Source: ionis-apps
+Section: science
+Priority: optional
+Maintainer: Greg Beam <ki7mt@yahoo.com>
+Build-Depends: debhelper-compat (= 13),
+ golang-go (>= 2:1.22~)
+Standards-Version: 4.6.2
+Homepage: https://github.com/IONIS-AI/ionis-apps
+Vcs-Git: https://github.com/IONIS-AI/ionis-apps.git
+Vcs-Browser: https://github.com/IONIS-AI/ionis-apps
+Rules-Requires-Root: no
+
+Package: ionis-apps
+Architecture: amd64 arm64
+Depends: ${misc:Depends},
+ ${shlibs:Depends},
+ ionis-core (>= 3.0.0),
+ ionis-apps-wspr (= ${binary:Version}),
+ ionis-apps-solar (= ${binary:Version}),
+ ionis-apps-contest (= ${binary:Version}),
+ ionis-apps-pskr (= ${binary:Version})
+Description: IONIS AI data pipeline applications (meta-package)
+ Complete suite of WSPR, solar, contest, and PSK Reporter data pipeline
+ tools for the IONIS Ionospheric Neural Inference System.
+
+Package: ionis-apps-wspr
+Architecture: amd64 arm64
+Depends: ${misc:Depends},
+ ${shlibs:Depends}
+Description: IONIS AI WSPR data ingesters
+ High-performance WSPR data ingesters for ClickHouse: wspr-turbo
+ (streaming .gz), wspr-shredder (batch CSV), wspr-parquet-native,
+ and wspr-download.
+
+Package: ionis-apps-solar
+Architecture: amd64 arm64
+Depends: ${misc:Depends},
+ ${shlibs:Depends}
+Description: IONIS AI solar index pipeline
+ Solar index download, ingest, and backfill tools for NOAA/SIDC/GFZ
+ Potsdam data. Includes cron-ready solar-live-update (15-min) and
+ solar-history-load (6-hour) scripts.
+
+Package: ionis-apps-contest
+Architecture: amd64 arm64
+Depends: ${misc:Depends},
+ ${shlibs:Depends}
+Description: IONIS AI contest and RBN ingesters
+ CQ contest Cabrillo log and Reverse Beacon Network data pipeline
+ tools: contest-download, contest-ingest, rbn-download, rbn-ingest.
+
+Package: ionis-apps-pskr
+Architecture: amd64 arm64
+Depends: ${misc:Depends},
+ ${shlibs:Depends}
+Description: IONIS AI PSK Reporter collector and ingester
+ PSK Reporter MQTT real-time collector and ClickHouse ingester
+ for live HF propagation monitoring.
