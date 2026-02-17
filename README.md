@@ -116,6 +116,7 @@ sudo make install
 | [ionis-core](https://github.com/IONIS-AI/ionis-core) | DDL schemas, SQL scripts |
 | [ionis-cuda](https://github.com/IONIS-AI/ionis-cuda) | CUDA signature embedding engine |
 | [ionis-training](https://github.com/IONIS-AI/ionis-training) | PyTorch model training |
+| [ionis-validate](https://github.com/IONIS-AI/ionis-validate) | Model validation suite (PyPI) |
 | [ionis-docs](https://github.com/IONIS-AI/ionis-docs) | Documentation site |
 
 ## License
