@@ -3,6 +3,12 @@
 // Bypasses the "File Penalty" by streaming directly from compressed archives
 // to ClickHouse Native Blocks without intermediate disk I/O.
 //
+// Uses a watermark table (wspr.ingest_log) to track which files have been loaded
+// and their sizes. WSPR monthly archives are cumulative — they grow as new spots
+// are added. When file_size increases, the month is re-ingested (partition-drop +
+// full reload). Supports --full (reload all), --prime (bootstrap watermark),
+// and --dry-run (list pending files).
+//
 // Architecture:
 //   - Stream decompression: tar.gz → memory (no disk extraction)
 //   - Vectorized parsing: CSV → columnar buffers (no row structs)
@@ -38,15 +44,16 @@ import (
 	"github.com/ClickHouse/ch-go"
 	"github.com/ClickHouse/ch-go/proto"
 	"github.com/IONIS-AI/ionis-apps/internal/bands"
+	"github.com/IONIS-AI/ionis-apps/internal/watermark"
 )
 
 // Version can be overridden at build time via -ldflags
 var Version = "dev"
 
 const (
-	BlockSize     = 1_000_000 // 1M rows per block
-	NumWorkers    = 16        // Parallel archive workers
-	NumSenders    = 4         // Parallel block senders per worker
+	BlockSize      = 1_000_000 // 1M rows per block
+	NumWorkers     = 16        // Parallel archive workers
+	NumSenders     = 4         // Parallel block senders per worker
 	ReadBufferSize = 4 * 1024 * 1024 // 4MB read buffer
 )
 
@@ -188,11 +195,11 @@ func (b *ColumnBlock) ToProtoInput() proto.Input {
 }
 
 type Stats struct {
-	TotalRows      atomic.Uint64
-	TotalBytes     atomic.Uint64
+	TotalRows        atomic.Uint64
+	TotalBytes       atomic.Uint64
 	ArchivesComplete atomic.Uint64
-	BlocksSent     atomic.Uint64
-	StartTime      time.Time
+	BlocksSent       atomic.Uint64
+	StartTime        time.Time
 }
 
 func NewStats() *Stats {
@@ -457,6 +464,11 @@ func (s *BlockSender) TruncatePartition(ctx context.Context, archivePath string)
 	return nil
 }
 
+// Conn returns the underlying ch.Client for watermark operations.
+func (s *BlockSender) Conn() *ch.Client {
+	return s.conn
+}
+
 // DoubleBuffer manages two blocks for concurrent fill/send
 type DoubleBuffer struct {
 	blocks [2]*ColumnBlock
@@ -497,10 +509,11 @@ func (db *DoubleBuffer) Release() {
 }
 
 // processArchive streams a tar.gz file directly to ClickHouse
-func processArchive(ctx context.Context, archivePath string, chHost, chDB, chTable string, stats *Stats, wg *sync.WaitGroup) {
+func processArchive(ctx context.Context, archivePath, sourceDir, chHost, chDB, chTable string, stats *Stats, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	fileName := filepath.Base(archivePath)
+	relPath := relPathFrom(sourceDir, archivePath)
 	startTime := time.Now()
 
 	// Get archive size
@@ -542,7 +555,7 @@ func processArchive(ctx context.Context, archivePath string, chHost, chDB, chTab
 	}
 	defer sender.Close()
 
-	// Truncate partition
+	// Truncate partition (always — WSPR monthly files are cumulative)
 	if err := sender.TruncatePartition(ctx, archivePath); err != nil {
 		log.Printf("[%s] Truncate warning: %v", fileName, err)
 	}
@@ -679,7 +692,13 @@ func processArchive(ctx context.Context, archivePath string, chHost, chDB, chTab
 	<-sendDone
 
 	elapsed := time.Since(startTime)
+	elapsedMs := uint32(elapsed.Milliseconds())
 	mrps := float64(rowCount) / elapsed.Seconds() / 1_000_000
+
+	// Record in watermark
+	if err := watermark.InsertLogEntry(ctx, sender.Conn(), chDB, relPath, archiveSize, rowCount, elapsedMs); err != nil {
+		log.Printf("[%s] watermark insert error: %v", fileName, err)
+	}
 
 	stats.TotalRows.Add(rowCount)
 	stats.TotalBytes.Add(archiveSize)
@@ -687,6 +706,15 @@ func processArchive(ctx context.Context, archivePath string, chHost, chDB, chTab
 	stats.BlocksSent.Add(blocksSent)
 
 	log.Printf("[%s] %d rows in %.1fs (%.2f Mrps, %d blocks)", fileName, rowCount, elapsed.Seconds(), mrps, blocksSent)
+}
+
+// relPathFrom returns the path relative to srcDir.
+func relPathFrom(srcDir, fullPath string) string {
+	rel, err := filepath.Rel(srcDir, fullPath)
+	if err != nil {
+		return filepath.Base(fullPath)
+	}
+	return rel
 }
 
 func main() {
@@ -697,12 +725,18 @@ func main() {
 	sourceDir := flag.String("source-dir", "/scratch/ai-stack/wspr-data/archives", "Archive source directory")
 	reportDir := flag.String("report-dir", "/mnt/ai-stack/wspr-data/reports-turbo", "Report output directory")
 	blockSize := flag.Int("block-size", BlockSize, "Rows per native block")
+	fullMode := flag.Bool("full", false, "Full reload: partition-drop + re-ingest all archives")
+	prime := flag.Bool("prime", false, "Bootstrap watermark for existing archives without loading data")
+	dryRun := flag.Bool("dry-run", false, "List files that would be processed, then exit")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "wspr-turbo v%s - Zero-Copy Streaming Pipeline\n\n", Version)
 		fmt.Fprintf(os.Stderr, "Usage: %s [OPTIONS] [archives...]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Streams tar.gz/csv.gz directly to ClickHouse Native Blocks.\n")
 		fmt.Fprintf(os.Stderr, "No intermediate disk I/O - bypasses the 'File Penalty'.\n\n")
+		fmt.Fprintf(os.Stderr, "Uses a watermark table (wspr.ingest_log) to track loaded files.\n")
+		fmt.Fprintf(os.Stderr, "WSPR monthly archives are cumulative — when file_size grows,\n")
+		fmt.Fprintf(os.Stderr, "the month is re-ingested (partition-drop + full reload).\n\n")
 		fmt.Fprintf(os.Stderr, "Architecture:\n")
 		fmt.Fprintf(os.Stderr, "  - Stream decompression (klauspost/gzip, ASM-optimized)\n")
 		fmt.Fprintf(os.Stderr, "  - Vectorized CSV parsing (columnar buffers)\n")
@@ -710,6 +744,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  - sync.Pool (zero allocation after warmup)\n")
 		fmt.Fprintf(os.Stderr, "  - ch-go native protocol with LZ4\n\n")
 		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		fmt.Fprintf(os.Stderr, "  wspr-turbo --prime                        # Bootstrap watermark\n")
+		fmt.Fprintf(os.Stderr, "  wspr-turbo --dry-run                      # Show pending files\n")
+		fmt.Fprintf(os.Stderr, "  wspr-turbo --source-dir /mnt/wspr-data    # Incremental load\n")
+		fmt.Fprintf(os.Stderr, "  wspr-turbo --full                         # Full reload all\n")
 	}
 
 	flag.Parse()
@@ -738,6 +777,15 @@ func main() {
 	log.Printf("Buffer: %d MB read | Double-buffered send", ReadBufferSize/1024/1024)
 	log.Printf("Protocol: ch-go Native + LZ4 + sync.Pool")
 	log.Printf("CPUs: %d", runtime.NumCPU())
+	if *dryRun {
+		log.Printf("Mode:     DRY-RUN (no data will be loaded)")
+	} else if *prime {
+		log.Printf("Mode:     PRIME (bootstrap watermark only)")
+	} else if *fullMode {
+		log.Printf("Mode:     FULL (partition-drop + reload all)")
+	} else {
+		log.Printf("Mode:     INCREMENTAL (skip unchanged files)")
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -763,7 +811,7 @@ func main() {
 	log.Printf("Table: %s.%s", *chDB, *chTable)
 
 	// Discover archives
-	var files []string
+	var allFiles []string
 	for _, inputPath := range inputPaths {
 		info, err := os.Stat(inputPath)
 		if err != nil {
@@ -780,22 +828,108 @@ func main() {
 					ext := strings.ToLower(filepath.Ext(path))
 					// Support .gz, .tar.gz, .csv
 					if ext == ".gz" || ext == ".csv" || strings.HasSuffix(path, ".tar.gz") {
-						files = append(files, path)
+						allFiles = append(allFiles, path)
 					}
 				}
 				return nil
 			})
 		} else {
-			files = append(files, inputPath)
+			allFiles = append(allFiles, inputPath)
+		}
+	}
+
+	if len(allFiles) == 0 {
+		log.Fatal("No archive files found")
+	}
+
+	sort.Strings(allFiles)
+	log.Printf("Found %d archive(s) on disk", len(allFiles))
+
+	// Prime mode: mark existing files and exit
+	if *prime {
+		log.Println("=========================================================")
+		log.Println("Priming watermark...")
+		var primeFiles []watermark.FileInfo
+		for _, fp := range allFiles {
+			fi, err := os.Stat(fp)
+			if err != nil {
+				continue
+			}
+			primeFiles = append(primeFiles, watermark.FileInfo{
+				RelPath: relPathFrom(*sourceDir, fp),
+				Size:    uint64(fi.Size()),
+			})
+		}
+		primed, err := watermark.PrimeFiles(ctx, *chHost, *chDB, primeFiles)
+		if err != nil {
+			log.Fatalf("Prime failed: %v", err)
+		}
+		log.Printf("Primed %d file(s) in watermark (row_count=0)", primed)
+		log.Println("=========================================================")
+		return
+	}
+
+	// Load watermark
+	wm, err := watermark.LoadWatermark(ctx, *chHost, *chDB)
+	if err != nil {
+		log.Fatalf("Load watermark failed: %v", err)
+	}
+	log.Printf("Watermark: %d file(s) tracked", len(wm))
+
+	// Filter files based on mode
+	var files []string
+	if *fullMode {
+		// Full mode: process all files
+		files = allFiles
+	} else {
+		// Incremental mode: skip files with unchanged size
+		// WSPR monthly archives are cumulative — they grow as new spots are added.
+		// If file_size increased, the month has new data and needs re-ingest.
+		for _, fp := range allFiles {
+			rel := relPathFrom(*sourceDir, fp)
+			fi, err := os.Stat(fp)
+			if err != nil {
+				continue
+			}
+			currentSize := uint64(fi.Size())
+
+			entry, ok := wm[rel]
+			if !ok {
+				// New file, not in watermark
+				files = append(files, fp)
+			} else if currentSize > entry.FileSize {
+				// File has grown — needs re-ingest
+				log.Printf("[%s] file grew: %d → %d bytes, will re-ingest", rel, entry.FileSize, currentSize)
+				files = append(files, fp)
+			}
+			// else: file unchanged, skip
 		}
 	}
 
 	if len(files) == 0 {
-		log.Fatal("No archive files found")
+		log.Println("0 new/changed archives to process")
+		log.Println("=========================================================")
+		return
 	}
 
-	sort.Strings(files)
-	log.Printf("Found %d archive(s)", len(files))
+	log.Printf("%d archive(s) to process", len(files))
+	log.Println("=========================================================")
+
+	// Dry-run mode: list files and exit
+	if *dryRun {
+		for _, fp := range files {
+			rel := relPathFrom(*sourceDir, fp)
+			fi, _ := os.Stat(fp)
+			entry, ok := wm[rel]
+			if ok {
+				fmt.Printf("  %s (%d bytes, was %d)\n", rel, fi.Size(), entry.FileSize)
+			} else {
+				fmt.Printf("  %s (%d bytes, new)\n", rel, fi.Size())
+			}
+		}
+		log.Printf("\nDry-run complete: %d archive(s) would be loaded", len(files))
+		return
+	}
 
 	stats := NewStats()
 
@@ -824,7 +958,7 @@ func main() {
 
 		go func(fp string) {
 			defer func() { <-sem }()
-			processArchive(ctx, fp, *chHost, *chDB, *chTable, stats, &wg)
+			processArchive(ctx, fp, *sourceDir, *chHost, *chDB, *chTable, stats, &wg)
 		}(filePath)
 	}
 

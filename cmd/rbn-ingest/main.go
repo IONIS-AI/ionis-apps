@@ -4,6 +4,10 @@
 // each ZIP, normalizes band via bands.GetBand(), and inserts into rbn.bronze
 // using ch-go native protocol with LZ4 compression.
 //
+// Uses a watermark table (rbn.ingest_log) to track which files have been loaded,
+// so only new files are processed on each run. Supports --full (reload all),
+// --prime (bootstrap watermark), and --dry-run (list pending files).
+//
 // Handles three RBN CSV format eras:
 //   - 2009-02-21 to 2010-06-14: no header, 11 columns
 //   - 2010-06-15 to 2010-12-31: header row, 11 columns
@@ -37,6 +41,7 @@ import (
 	"github.com/ClickHouse/ch-go"
 	"github.com/ClickHouse/ch-go/proto"
 	"github.com/IONIS-AI/ionis-apps/internal/bands"
+	"github.com/IONIS-AI/ionis-apps/internal/watermark"
 )
 
 var Version = "dev"
@@ -48,11 +53,11 @@ const (
 
 // Stats tracks ingestion metrics with atomic operations.
 type Stats struct {
-	TotalRows     atomic.Uint64
-	TotalFiles    atomic.Uint64
-	SkippedRows   atomic.Uint64
-	FailedFiles   atomic.Uint64
-	StartTime     time.Time
+	TotalRows   atomic.Uint64
+	TotalFiles  atomic.Uint64
+	SkippedRows atomic.Uint64
+	FailedFiles atomic.Uint64
+	StartTime   time.Time
 }
 
 // RBNBatch holds columnar data for a batch INSERT into rbn.bronze.
@@ -237,23 +242,53 @@ func flushBatch(ctx context.Context, conn *ch.Client, tableFQN string, batch *RB
 	})
 }
 
+// dropDayPartition drops the partition for a specific date from rbn.bronze.
+// RBN files are named rbndata-YYYYMMDD.zip, so we extract the date.
+func dropDayPartition(ctx context.Context, conn *ch.Client, tableFQN, zipName string) error {
+	// Extract YYYYMMDD from rbndata-YYYYMMDD.zip
+	base := strings.TrimSuffix(zipName, ".zip")
+	if !strings.HasPrefix(base, "rbndata-") || len(base) < 16 {
+		return nil // skip non-standard filenames
+	}
+	dateStr := base[8:] // YYYYMMDD
+
+	query := fmt.Sprintf("ALTER TABLE %s DROP PARTITION '%s'", tableFQN, dateStr)
+	if err := conn.Do(ctx, ch.Query{Body: query}); err != nil {
+		if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "NO_SUCH_DATA_PART") {
+			return err
+		}
+	}
+	return nil
+}
+
 // processZIP opens a ZIP, reads the CSV inside, parses rows, and inserts batches.
-func processZIP(ctx context.Context, zipPath, host, db, table string, batchSize int, stats *Stats) {
+// Returns the row count on success, or 0 on failure.
+func processZIP(ctx context.Context, zipPath, srcDir, host, db, table string, batchSize int, fullMode bool, stats *Stats) uint64 {
 	fileName := filepath.Base(zipPath)
+	relPath := relPathFrom(srcDir, zipPath)
+
+	// Get file size
+	fi, err := os.Stat(zipPath)
+	if err != nil {
+		log.Printf("[%s] stat error: %v", fileName, err)
+		stats.FailedFiles.Add(1)
+		return 0
+	}
+	fileSize := uint64(fi.Size())
 
 	// Open ZIP
 	zr, err := zip.OpenReader(zipPath)
 	if err != nil {
 		log.Printf("[%s] open error: %v", fileName, err)
 		stats.FailedFiles.Add(1)
-		return
+		return 0
 	}
 	defer zr.Close()
 
 	if len(zr.File) == 0 {
 		log.Printf("[%s] empty ZIP", fileName)
 		stats.FailedFiles.Add(1)
-		return
+		return 0
 	}
 
 	// Open the first (only) CSV file inside the ZIP
@@ -262,7 +297,7 @@ func processZIP(ctx context.Context, zipPath, host, db, table string, batchSize 
 	if err != nil {
 		log.Printf("[%s] csv open error: %v", fileName, err)
 		stats.FailedFiles.Add(1)
-		return
+		return 0
 	}
 	defer rc.Close()
 
@@ -275,11 +310,18 @@ func processZIP(ctx context.Context, zipPath, host, db, table string, batchSize 
 	if err != nil {
 		log.Printf("[%s] ClickHouse connect error: %v", fileName, err)
 		stats.FailedFiles.Add(1)
-		return
+		return 0
 	}
 	defer conn.Close()
 
 	tableFQN := fmt.Sprintf("%s.%s", db, table)
+
+	// In full mode, drop the day's partition before re-ingest
+	if fullMode {
+		if err := dropDayPartition(ctx, conn, tableFQN, fileName); err != nil {
+			log.Printf("[%s] partition drop error: %v", fileName, err)
+		}
+	}
 
 	// CSV reader
 	csvReader := csv.NewReader(rc)
@@ -298,7 +340,7 @@ func processZIP(ctx context.Context, zipPath, host, db, table string, batchSize 
 
 	for {
 		if ctx.Err() != nil {
-			return
+			return 0
 		}
 
 		record, err := csvReader.Read()
@@ -343,7 +385,13 @@ func processZIP(ctx context.Context, zipPath, host, db, table string, batchSize 
 	}
 
 	elapsed := time.Since(startTime)
+	elapsedMs := uint32(elapsed.Milliseconds())
 	mrps := float64(rowCount) / elapsed.Seconds() / 1_000_000
+
+	// Record in watermark
+	if err := watermark.InsertLogEntry(ctx, conn, db, relPath, fileSize, rowCount, elapsedMs); err != nil {
+		log.Printf("[%s] watermark insert error: %v", fileName, err)
+	}
 
 	stats.TotalRows.Add(rowCount)
 	stats.SkippedRows.Add(skipCount)
@@ -351,6 +399,17 @@ func processZIP(ctx context.Context, zipPath, host, db, table string, batchSize 
 
 	log.Printf("[%s] %d rows in %.1fs (%.2f Mrps), %d skipped",
 		fileName, rowCount, elapsed.Seconds(), mrps, skipCount)
+
+	return rowCount
+}
+
+// relPathFrom returns the path relative to srcDir.
+func relPathFrom(srcDir, fullPath string) string {
+	rel, err := filepath.Rel(srcDir, fullPath)
+	if err != nil {
+		return filepath.Base(fullPath)
+	}
+	return rel
 }
 
 // discoverFiles walks srcDir for ZIP files, optionally filtered by year.
@@ -397,6 +456,9 @@ func main() {
 	workers := flag.Int("workers", DefaultWorkers, "Parallel ZIP workers")
 	batchSize := flag.Int("batch", DefaultBatchSize, "Rows per INSERT batch")
 	year := flag.Int("year", 0, "Process only this year (0 = all)")
+	fullMode := flag.Bool("full", false, "Full reload: drop partitions and re-ingest all files")
+	prime := flag.Bool("prime", false, "Bootstrap watermark for existing ZIPs without loading data")
+	dryRun := flag.Bool("dry-run", false, "List files that would be processed, then exit")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "rbn-ingest v%s — Stream RBN ZIP archives into ClickHouse\n\n", Version)
@@ -404,14 +466,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Reads daily ZIP files from --src/{year}/*.zip, parses CSV,\n")
 		fmt.Fprintf(os.Stderr, "normalizes band via ADIF lookup, and inserts into ClickHouse\n")
 		fmt.Fprintf(os.Stderr, "using ch-go native protocol with LZ4 compression.\n\n")
+		fmt.Fprintf(os.Stderr, "Uses a watermark table (rbn.ingest_log) to track loaded files\n")
+		fmt.Fprintf(os.Stderr, "for incremental processing.\n\n")
 		fmt.Fprintf(os.Stderr, "Handles all three RBN CSV format eras:\n")
 		fmt.Fprintf(os.Stderr, "  2009-2010: 11 columns (no speed/tx_mode)\n")
 		fmt.Fprintf(os.Stderr, "  2011+:     13 columns (speed + tx_mode)\n\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		fmt.Fprintf(os.Stderr, "  rbn-ingest --prime                   # Bootstrap watermark\n")
+		fmt.Fprintf(os.Stderr, "  rbn-ingest --dry-run                 # Show new files\n")
+		fmt.Fprintf(os.Stderr, "  rbn-ingest                           # Incremental load\n")
+		fmt.Fprintf(os.Stderr, "  rbn-ingest --full                    # Full reload\n")
 		fmt.Fprintf(os.Stderr, "  rbn-ingest --year 2024 --workers 4\n")
-		fmt.Fprintf(os.Stderr, "  rbn-ingest --workers 8\n")
-		fmt.Fprintf(os.Stderr, "  rbn-ingest --src /mnt/rbn-data --host 10.60.1.1:9000\n")
+		fmt.Fprintf(os.Stderr, "  rbn-ingest --host 10.60.1.1:9000\n")
 	}
 
 	flag.Parse()
@@ -427,6 +494,15 @@ func main() {
 		log.Printf("Year:     %d", *year)
 	} else {
 		log.Printf("Year:     all")
+	}
+	if *dryRun {
+		log.Printf("Mode:     DRY-RUN (no data will be loaded)")
+	} else if *prime {
+		log.Printf("Mode:     PRIME (bootstrap watermark only)")
+	} else if *fullMode {
+		log.Printf("Mode:     FULL (drop partitions + reload all)")
+	} else {
+		log.Printf("Mode:     INCREMENTAL (skip watermarked files)")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -453,15 +529,81 @@ func main() {
 	log.Println("Connection OK")
 
 	// Discover ZIP files
-	files, err := discoverFiles(*src, *year)
+	allFiles, err := discoverFiles(*src, *year)
 	if err != nil {
 		log.Fatalf("File discovery failed: %v", err)
 	}
-	if len(files) == 0 {
+	if len(allFiles) == 0 {
 		log.Fatal("No ZIP files found")
 	}
-	log.Printf("Found %d ZIP file(s)", len(files))
+	log.Printf("Found %d ZIP file(s) on disk", len(allFiles))
+
+	// Prime mode: mark existing files and exit
+	if *prime {
+		log.Println("=========================================================")
+		log.Println("Priming watermark...")
+		var primeFiles []watermark.FileInfo
+		for _, fp := range allFiles {
+			fi, err := os.Stat(fp)
+			if err != nil {
+				continue
+			}
+			primeFiles = append(primeFiles, watermark.FileInfo{
+				RelPath: relPathFrom(*src, fp),
+				Size:    uint64(fi.Size()),
+			})
+		}
+		primed, err := watermark.PrimeFiles(ctx, *host, *db, primeFiles)
+		if err != nil {
+			log.Fatalf("Prime failed: %v", err)
+		}
+		log.Printf("Primed %d file(s) in watermark (row_count=0)", primed)
+		log.Println("=========================================================")
+		return
+	}
+
+	// Load watermark
+	wm, err := watermark.LoadWatermark(ctx, *host, *db)
+	if err != nil {
+		log.Fatalf("Load watermark failed: %v", err)
+	}
+	log.Printf("Watermark: %d file(s) already loaded", len(wm))
+
+	// Filter files based on mode
+	var filesToProcess []string
+	if *fullMode {
+		// Full mode: process all files
+		filesToProcess = allFiles
+	} else {
+		// Incremental mode: skip watermarked files
+		for _, fp := range allFiles {
+			rel := relPathFrom(*src, fp)
+			if _, ok := wm[rel]; ok {
+				continue
+			}
+			filesToProcess = append(filesToProcess, fp)
+		}
+	}
+
+	if len(filesToProcess) == 0 {
+		log.Println("0 new files to process")
+		log.Println("=========================================================")
+		return
+	}
+
+	log.Printf("%d file(s) to process", len(filesToProcess))
 	log.Println("=========================================================")
+
+	// Dry-run mode: list files and exit
+	if *dryRun {
+		for _, fp := range filesToProcess {
+			rel := relPathFrom(*src, fp)
+			fi, _ := os.Stat(fp)
+			fmt.Printf("  %s (%d bytes)\n", rel, fi.Size())
+		}
+		log.Printf("\nDry-run complete: %d file(s) would be loaded", len(filesToProcess))
+		return
+	}
 
 	stats := &Stats{StartTime: time.Now()}
 
@@ -469,7 +611,7 @@ func main() {
 	sem := make(chan struct{}, *workers)
 	var wg sync.WaitGroup
 
-	for _, zipPath := range files {
+	for _, zipPath := range filesToProcess {
 		if ctx.Err() != nil {
 			break
 		}
@@ -480,7 +622,7 @@ func main() {
 		go func(zp string) {
 			defer func() { <-sem }()
 			defer wg.Done()
-			processZIP(ctx, zp, *host, *db, *table, *batchSize, stats)
+			processZIP(ctx, zp, *src, *host, *db, *table, *batchSize, *fullMode, stats)
 		}(zipPath)
 	}
 

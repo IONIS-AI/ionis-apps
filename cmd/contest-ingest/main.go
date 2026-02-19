@@ -4,6 +4,10 @@
 // and QSO lines, normalizes band via bands.GetBand(), and batch INSERTs into
 // contest.bronze using ch-go native protocol with LZ4 compression.
 //
+// Uses a watermark table (contest.ingest_log) to track which files have been
+// loaded, so only new files are processed on each run. Supports --full (reload
+// all), --prime (bootstrap watermark), and --dry-run (list pending files).
+//
 // Optionally extracts GRID-LOCATOR headers and enriches wspr.callsign_grid.
 //
 // Build: CGO_ENABLED=0 go build -ldflags="-s -w" -o build/contest-ingest ./cmd/contest-ingest
@@ -33,6 +37,7 @@ import (
 	"github.com/ClickHouse/ch-go"
 	"github.com/ClickHouse/ch-go/proto"
 	"github.com/IONIS-AI/ionis-apps/internal/bands"
+	"github.com/IONIS-AI/ionis-apps/internal/watermark"
 )
 
 var Version = "dev"
@@ -373,6 +378,15 @@ func sourceKey(path, srcDir string) string {
 	return dir
 }
 
+// relPathFrom returns the path relative to srcDir.
+func relPathFrom(srcDir, fullPath string) string {
+	rel, err := filepath.Rel(srcDir, fullPath)
+	if err != nil {
+		return fullPath
+	}
+	return rel
+}
+
 // RejectWriter appends failed file paths and error reasons to a reject log.
 // Thread-safe via mutex. If no path is configured, writes are silently discarded.
 type RejectWriter struct {
@@ -469,7 +483,7 @@ func flushGrids(ctx context.Context, conn *ch.Client, entries []GridEntry) error
 }
 
 // processFile parses a single Cabrillo log and inserts QSOs using a shared connection.
-func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table string, batchSize int, enrich bool, stats *Stats, rejectWriter *RejectWriter) {
+func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table string, batchSize int, enrich bool, stats *Stats, rejectWriter *RejectWriter) uint64 {
 	fileName := filepath.Base(path)
 	src := sourceKey(path, srcDir)
 	relPath := filepath.Join(src, fileName)
@@ -482,13 +496,13 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 		log.Printf("[%s] parse error: %v", relPath, err)
 		stats.FailedFiles.Add(1)
 		rejectWriter.Write(relPath, err.Error())
-		return
+		return 0
 	}
 
 	if len(qsos) == 0 {
 		stats.FailedFiles.Add(1)
 		rejectWriter.Write(relPath, "0 QSOs parsed")
-		return
+		return 0
 	}
 
 	tableFQN := fmt.Sprintf("%s.%s", db, table)
@@ -499,10 +513,11 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 
 	contestID := headers.Contest
 	var rowCount uint64
+	startTime := time.Now()
 
 	for _, qso := range qsos {
 		if ctx.Err() != nil {
-			return
+			return 0
 		}
 
 		batch.Timestamp.Append(qso.Timestamp)
@@ -536,6 +551,22 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 		batch.Reset()
 	}
 
+	elapsed := time.Since(startTime)
+	elapsedMs := uint32(elapsed.Milliseconds())
+
+	// Get file size for watermark
+	fi, _ := os.Stat(path)
+	fileSize := uint64(0)
+	if fi != nil {
+		fileSize = uint64(fi.Size())
+	}
+
+	// Record in watermark
+	wmRelPath := relPathFrom(srcDir, path)
+	if err := watermark.InsertLogEntry(ctx, conn, db, wmRelPath, fileSize, rowCount, elapsedMs); err != nil {
+		log.Printf("[%s] watermark insert error: %v", relPath, err)
+	}
+
 	stats.TotalRows.Add(rowCount)
 	stats.TotalFiles.Add(1)
 
@@ -551,6 +582,8 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 			stats.GridsFound.Add(1)
 		}
 	}
+
+	return rowCount
 }
 
 // worker processes files from a channel using a persistent ClickHouse connection.
@@ -634,6 +667,9 @@ func main() {
 	contest := flag.String("contest", "", "Process only this contest key (empty = all)")
 	enrich := flag.Bool("enrich", false, "Also insert GRID-LOCATOR into wspr.callsign_grid")
 	rejectLog := flag.String("reject-log", "", "Append failed files to this reject log (empty = disabled)")
+	fullMode := flag.Bool("full", false, "Full reload: re-ingest all files, update watermark")
+	prime := flag.Bool("prime", false, "Bootstrap watermark for existing log files without loading data")
+	dryRun := flag.Bool("dry-run", false, "List files that would be processed, then exit")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "contest-ingest v%s — Parse Cabrillo contest logs into ClickHouse\n\n", Version)
@@ -641,11 +677,17 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Walks --src/{contest}/{yearmode}/*.log, parses Cabrillo headers\n")
 		fmt.Fprintf(os.Stderr, "and QSO lines, normalizes band via ADIF lookup, and inserts into\n")
 		fmt.Fprintf(os.Stderr, "ClickHouse using ch-go native protocol with LZ4 compression.\n\n")
+		fmt.Fprintf(os.Stderr, "Uses a watermark table (contest.ingest_log) to track loaded files\n")
+		fmt.Fprintf(os.Stderr, "for incremental processing.\n\n")
 		flag.PrintDefaults()
 		fmt.Fprintf(os.Stderr, "\nExamples:\n")
+		fmt.Fprintf(os.Stderr, "  contest-ingest --prime                   # Bootstrap watermark\n")
+		fmt.Fprintf(os.Stderr, "  contest-ingest --dry-run                 # Show new files\n")
+		fmt.Fprintf(os.Stderr, "  contest-ingest                           # Incremental load\n")
+		fmt.Fprintf(os.Stderr, "  contest-ingest --full                    # Full reload\n")
 		fmt.Fprintf(os.Stderr, "  contest-ingest --contest cq-ww --workers 4\n")
 		fmt.Fprintf(os.Stderr, "  contest-ingest --enrich\n")
-		fmt.Fprintf(os.Stderr, "  contest-ingest --src /mnt/contest-logs --host 10.60.1.1:9000\n")
+		fmt.Fprintf(os.Stderr, "  contest-ingest --host 10.60.1.1:9000\n")
 	}
 
 	flag.Parse()
@@ -665,6 +707,15 @@ func main() {
 		log.Printf("Contest:  %s", *contest)
 	} else {
 		log.Printf("Contest:  all")
+	}
+	if *dryRun {
+		log.Printf("Mode:     DRY-RUN (no data will be loaded)")
+	} else if *prime {
+		log.Printf("Mode:     PRIME (bootstrap watermark only)")
+	} else if *fullMode {
+		log.Printf("Mode:     FULL (re-ingest all files)")
+	} else {
+		log.Printf("Mode:     INCREMENTAL (skip watermarked files)")
 	}
 
 	rejectWriter, err := NewRejectWriter(*rejectLog)
@@ -697,15 +748,82 @@ func main() {
 	log.Println("Connection OK")
 
 	// Discover .log files
-	files, err := discoverFiles(*src, *contest)
+	allFiles, err := discoverFiles(*src, *contest)
 	if err != nil {
 		log.Fatalf("File discovery failed: %v", err)
 	}
-	if len(files) == 0 {
+	if len(allFiles) == 0 {
 		log.Fatal("No .log files found")
 	}
-	log.Printf("Found %d .log file(s)", len(files))
+	log.Printf("Found %d .log file(s) on disk", len(allFiles))
+
+	// Prime mode: mark existing files and exit
+	if *prime {
+		log.Println("=========================================================")
+		log.Println("Priming watermark...")
+		var primeFiles []watermark.FileInfo
+		for _, fp := range allFiles {
+			fi, err := os.Stat(fp)
+			if err != nil {
+				continue
+			}
+			primeFiles = append(primeFiles, watermark.FileInfo{
+				RelPath: relPathFrom(*src, fp),
+				Size:    uint64(fi.Size()),
+			})
+		}
+		primed, err := watermark.PrimeFiles(ctx, *host, *db, primeFiles)
+		if err != nil {
+			log.Fatalf("Prime failed: %v", err)
+		}
+		log.Printf("Primed %d file(s) in watermark (row_count=0)", primed)
+		log.Println("=========================================================")
+		return
+	}
+
+	// Load watermark
+	wm, err := watermark.LoadWatermark(ctx, *host, *db)
+	if err != nil {
+		log.Fatalf("Load watermark failed: %v", err)
+	}
+	log.Printf("Watermark: %d file(s) already loaded", len(wm))
+
+	// Filter files based on mode
+	var filesToProcess []string
+	if *fullMode {
+		// Full mode: process all files
+		filesToProcess = allFiles
+	} else {
+		// Incremental mode: skip watermarked files
+		// Contest logs are static — once downloaded, they don't change
+		for _, fp := range allFiles {
+			rel := relPathFrom(*src, fp)
+			if _, ok := wm[rel]; ok {
+				continue
+			}
+			filesToProcess = append(filesToProcess, fp)
+		}
+	}
+
+	if len(filesToProcess) == 0 {
+		log.Println("0 new files to process")
+		log.Println("=========================================================")
+		return
+	}
+
+	log.Printf("%d file(s) to process", len(filesToProcess))
 	log.Println("=========================================================")
+
+	// Dry-run mode: list files and exit
+	if *dryRun {
+		for _, fp := range filesToProcess {
+			rel := relPathFrom(*src, fp)
+			fi, _ := os.Stat(fp)
+			fmt.Printf("  %s (%d bytes)\n", rel, fi.Size())
+		}
+		log.Printf("\nDry-run complete: %d file(s) would be loaded", len(filesToProcess))
+		return
+	}
 
 	stats := &Stats{StartTime: time.Now()}
 
@@ -718,7 +836,7 @@ func main() {
 		go worker(ctx, i, fileChan, *src, *host, *db, *table, *batchSize, *enrich, stats, rejectWriter, &wg)
 	}
 
-	for _, logPath := range files {
+	for _, logPath := range filesToProcess {
 		if ctx.Err() != nil {
 			break
 		}

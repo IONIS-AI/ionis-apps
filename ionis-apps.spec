@@ -53,6 +53,7 @@ WSPR (Weak Signal Propagation Reporter) data processing applications:
 
 - wspr-shredder:       High-performance uncompressed CSV ingester (14.4 Mrps)
 - wspr-turbo:          Zero-copy streaming ingester for .gz archives (8.8 Mrps)
+                       Supports --full, --prime, --dry-run with watermark tracking.
 - wspr-parquet-native: Native Parquet file ingester (8.4 Mrps)
 - wspr-download:       Parallel archive downloader from wsprnet.org
 
@@ -85,6 +86,8 @@ Contest log and Reverse Beacon Network data processing applications:
 - rbn-download:      RBN daily ZIP archive downloader (2009-present)
 - rbn-ingest:        RBN ZIP→CSV→ClickHouse ingester (2.18B rows in 3m32s)
 
+All ingesters support --full, --prime, and --dry-run modes with watermark
+tracking via ingest_log tables for safe incremental cron-based loading.
 All ingestion tools use ch-go native protocol with LZ4 compression.
 
 %package pskr
@@ -140,6 +143,22 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/pskr-ingest
 
 %changelog
+* Thu Feb 19 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.6-1
+- Add watermark tracking to rbn-ingest, wspr-turbo, and contest-ingest
+- Add internal/watermark shared package (LoadWatermark, InsertLogEntry, PrimeFiles)
+- All 3 ingesters now support --full, --prime, and --dry-run flags
+- wspr-turbo detects cumulative file growth via file_size comparison
+- Paired download+ingest pattern: every downloader has a partner ingester
+
+* Mon Feb 17 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.4-1
+- Add Debian packaging for Launchpad PPA (debian/ directory)
+- Fix Launchpad build: set GOPATH/GOCACHE to writable dirs
+- Fix Launchpad build: set GOTOOLCHAIN=local
+- Fix day-of-week in debian/changelog
+
+* Mon Feb 17 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.3-1
+- Add ionis-validate to related repositories in README
+
 * Thu Feb 13 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.2-1
 - Fix solar-history-load: temp-table merge prevents ReplacingMergeTree stream loss
 - Three NOAA streams (X-ray, Kp, SFI) now merged via GROUP BY before bronze insert
