@@ -72,6 +72,7 @@ Solar and geomagnetic data processing applications:
 - solar-refresh:      Download + truncate + ingest pipeline script
 - solar-live-update:  Now-Casting live conditions updater (15-min cron)
 - solar-history-load: Historical solar data loader for training (6-hour cron)
+- dscovr-ingest:      DSCOVR L1 solar wind ingester (Bz, Bt, speed, density, temp)
 
 %package contest
 Summary:        Contest and RBN data processing tools
@@ -128,6 +129,7 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/solar-ingest
 %{_bindir}/solar-download
 %{_bindir}/solar-backfill
+%{_bindir}/dscovr-ingest
 %{_bindir}/solar-refresh
 %{_bindir}/solar-live-update
 %{_bindir}/solar-history-load
@@ -143,6 +145,11 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/pskr-ingest
 
 %changelog
+* Fri Feb 21 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.7-1
+- Add dscovr-ingest: DSCOVR L1 solar wind ingester (Bz, Bt, speed, density, temp)
+- Downloads 7-day rolling magnetometer + plasma JSON from NOAA SWPC
+- Inserts into solar.dscovr via ch-go native protocol with LZ4 compression
+
 * Thu Feb 19 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.6-1
 - Add watermark tracking to rbn-ingest, wspr-turbo, and contest-ingest
 - Add internal/watermark shared package (LoadWatermark, InsertLogEntry, PrimeFiles)

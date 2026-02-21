@@ -51,7 +51,7 @@ DISTDIR      := dist
 # Note: Legacy tools (wspr-ingest, wspr-ingest-cpu, wspr-ingest-fast) removed
 #       due to clickhouse-go/v2 API incompatibility. Replaced by faster tools.
 WSPR_CMDS    := wspr-shredder wspr-turbo wspr-parquet-native wspr-download
-SOLAR_CMDS   := solar-ingest solar-download solar-backfill
+SOLAR_CMDS   := solar-ingest solar-download solar-backfill dscovr-ingest
 CONTEST_CMDS := contest-download rbn-download rbn-ingest contest-ingest
 PSKR_CMDS    := pskr-collector pskr-ingest
 UTIL_CMDS    := db-validate
@@ -82,6 +82,7 @@ help:
 	@printf "  solar-download       Multi-source solar data downloader\n"
 	@printf "  solar-ingest         Solar/geomagnetic data ingester\n"
 	@printf "  solar-refresh        Download + ingest pipeline script\n"
+	@printf "  dscovr-ingest        DSCOVR L1 solar wind ingester (Bz/speed/density)\n"
 	@printf "\n"
 	@printf "Contest Tools:\n"
 	@printf "  contest-download     CQ contest Cabrillo log downloader\n"
