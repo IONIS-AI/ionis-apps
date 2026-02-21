@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        3.2.0
+Version:        3.3.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -145,7 +145,7 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/pskr-ingest
 
 %changelog
-* Fri Feb 21 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.7-1
+* Sat Feb 21 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.7-1
 - Add dscovr-ingest: DSCOVR L1 solar wind ingester (Bz, Bt, speed, density, temp)
 - Downloads 7-day rolling magnetometer + plasma JSON from NOAA SWPC
 - Inserts into solar.dscovr via ch-go native protocol with LZ4 compression
@@ -157,20 +157,20 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 - wspr-turbo detects cumulative file growth via file_size comparison
 - Paired download+ingest pattern: every downloader has a partner ingester
 
-* Mon Feb 17 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.4-1
+* Tue Feb 17 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.4-1
 - Add Debian packaging for Launchpad PPA (debian/ directory)
 - Fix Launchpad build: set GOPATH/GOCACHE to writable dirs
 - Fix Launchpad build: set GOTOOLCHAIN=local
 - Fix day-of-week in debian/changelog
 
-* Mon Feb 17 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.3-1
+* Tue Feb 17 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.3-1
 - Add ionis-validate to related repositories in README
 
-* Thu Feb 13 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.2-1
+* Fri Feb 13 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.2-1
 - Fix solar-history-load: temp-table merge prevents ReplacingMergeTree stream loss
 - Three NOAA streams (X-ray, Kp, SFI) now merged via GROUP BY before bronze insert
 
-* Thu Feb 13 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.1-1
+* Fri Feb 13 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.1-1
 - Add Obsoletes/Provides to wspr, solar, contest subpackages for seamless upgrade
 - Add pskr subpackage to main package Requires (was missing from install)
 
