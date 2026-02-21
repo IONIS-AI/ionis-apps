@@ -3,7 +3,14 @@ bin/
 build/
 dist/
 
-# Go binaries
+# Go binaries (built in repo root)
+contest-ingest
+rbn-ingest
+wspr-turbo
+pskr-ingest
+solar-*
+wspr-download
+wspr-shredder
 *.exe
 *.exe~
 *.dll
