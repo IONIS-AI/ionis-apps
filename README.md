@@ -54,15 +54,15 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 
 ## Data Pipeline Summary
 
-**Total dataset: 13.18B+ observations** — the largest curated amateur radio propagation dataset in existence.
+**Total dataset: 14.34B observations, 258 GiB on disk** — the largest curated amateur radio propagation dataset in existence.
 
 | Source | Volume | Tool | Throughput |
 |--------|--------|------|------------|
-| WSPR | 10.8B spots | `wspr-turbo` | 22.55 Mrps, 7m27s |
-| RBN | 2.18B spots | `rbn-ingest` | 10.32 Mrps, 3m32s |
-| Contest Logs | 195M QSOs | `contest-ingest` | 258K rps, 12m37s |
-| Solar Indices | 76K rows | `solar-backfill` | 2.88M rps |
-| PSK Reporter | ~22M/day (collecting) | `pskr-collector` | ~250 HF spots/sec |
+| WSPR | 10.9B spots | `wspr-turbo` | 22.55 Mrps, 7m27s |
+| RBN | 2.26B spots | `rbn-ingest` | 10.32 Mrps, 3m32s |
+| Contest Logs | 234M QSOs | `contest-ingest` | 258K rps, 12m37s |
+| Solar Indices | 77K rows | `solar-backfill` | 2.88M rps |
+| PSK Reporter | ~26M/day (live since Feb 2026) | `pskr-collector` | ~300 HF spots/sec |
 
 ## Idempotent Pipeline (v3.0.5+)
 
