@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        3.3.0
+Version:        4.0.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -145,6 +145,9 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/pskr-ingest
 
 %changelog
+* Wed Feb 25 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.0-1
+- Align version across all IONIS packages at 4.0.0 (Phase 4.0 release)
+
 * Sat Feb 21 2026 Greg Beam <ki7mt@yahoo.com> - 3.0.7-1
 - Add dscovr-ingest: DSCOVR L1 solar wind ingester (Bz, Bt, speed, density, temp)
 - Downloads 7-day rolling magnetometer + plasma JSON from NOAA SWPC
