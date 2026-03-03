@@ -54,7 +54,7 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 
 ## Data Pipeline Summary
 
-**Total dataset: 14.34B observations, 258 GiB on disk** — the largest curated amateur radio propagation dataset in existence.
+**Total dataset: 14.34B observations, 258 GiB on disk** — one of the largest curated amateur radio propagation datasets we are aware of.
 
 | Source | Volume | Tool | Throughput |
 |--------|--------|------|------------|
