@@ -119,16 +119,16 @@ printf "  Aggregated to %s 3-hour X-ray buckets\n" "$XRAY_ROWS"
 # ─────────────────────────────────────────────────────────────────────────────
 printf "[%s] Processing Kp index data...\n" "$(date '+%Y-%m-%d %H:%M:%S')"
 
-# Skip header row [0], parse remaining
-# Kp is field [1], ap_running is field [2]
-# Time format: "2026-01-27 00:00:00.000" → need "2026-01-27 00:00:00"
+# NOAA SWPC Kp endpoint switched to array-of-objects (~Apr 2026):
+#   [{"time_tag":"2026-04-21T00:00:00","Kp":4.67,"a_running":39,"station_count":8}, ...]
+# Convert ISO "YYYY-MM-DDTHH:MM:SS" -> ClickHouse DateTime "YYYY-MM-DD HH:MM:SS".
 KP_CSV=$(jq -r '
-  .[1:][]
+  .[]
   | {
-      date: .[0][:10],
-      time: .[0][:19],
-      kp:   (.[1] | tonumber),
-      ap:   (.[2] | tonumber)
+      date: (.time_tag[:10]),
+      time: (.time_tag[:10] + " " + .time_tag[11:19]),
+      kp:   (.Kp | tonumber),
+      ap:   (.a_running | tonumber)
     }
   | "\(.date)\t\(.time)\t0\t0\t0\t\(.kp)\t\(.ap)\tnoaa_kp_7day.json\t0\t0"
 ' "$KP_FILE")
