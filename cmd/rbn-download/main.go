@@ -17,6 +17,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -27,6 +28,9 @@ import (
 	"syscall"
 	"time"
 )
+
+// errNotFound signals an upstream archive gap (HTTP 404), not a real failure.
+var errNotFound = errors.New("not found (no data for this date)")
 
 // Version can be overridden at build time via -ldflags
 var Version = "dev"
@@ -157,8 +161,9 @@ func main() {
 	fmt.Println()
 
 	// Download loop
-	var downloaded, skipped, failed, totalBytes int64
+	var downloaded, skipped, failed, notFound, totalBytes int64
 	var remaining int
+	var gapDates []string
 
 	for i, d := range dates {
 		if ctx.Err() != nil {
@@ -194,9 +199,15 @@ func main() {
 
 		size, err := downloadFile(ctx, client, url, destPath)
 		if err != nil {
-			fmt.Printf("[%*d/%d] %s FAILED: %v\n",
-				countWidth(len(dates)), i+1, len(dates), filename, err)
-			failed++
+			if errors.Is(err, errNotFound) {
+				// Known RBN archive gap — count and continue without noise
+				notFound++
+				gapDates = append(gapDates, d.Format("2006-01-02"))
+			} else {
+				fmt.Printf("[%*d/%d] %s FAILED: %v\n",
+					countWidth(len(dates)), i+1, len(dates), filename, err)
+				failed++
+			}
 		} else {
 			totalBytes += size
 			fmt.Printf("[%*d/%d] %s (%s) OK\n",
@@ -214,11 +225,19 @@ func main() {
 	fmt.Printf("  Downloaded: %d files (%s)\n", downloaded, formatBytes(totalBytes))
 	fmt.Printf("  Skipped:    %d (already on disk)\n", skipped)
 	fmt.Printf("  Failed:     %d\n", failed)
+	if notFound > 0 {
+		fmt.Printf("  Gap days:   %d (no archive on RBN — not a failure)\n", notFound)
+		if len(gapDates) <= 20 {
+			fmt.Printf("  Gap dates:  %v\n", gapDates)
+		}
+	}
 	if remaining > 0 {
 		fmt.Printf("  Remaining:  %d\n", remaining)
 		fmt.Println("  Run again to resume.")
 	}
 
+	// Only fail on real errors. RBN archive gaps are an upstream condition,
+	// not a defect — exiting nonzero on them tripped the systemd timer daily.
 	if failed > 0 {
 		os.Exit(1)
 	}
@@ -240,7 +259,7 @@ func downloadFile(ctx context.Context, client *http.Client, url, destPath string
 
 	if resp.StatusCode == http.StatusNotFound {
 		// Missing days are normal (RBN may not have data for every day)
-		return 0, fmt.Errorf("not found (no data for this date)")
+		return 0, errNotFound
 	}
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
