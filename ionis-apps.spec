@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.0.2
+Version:        4.0.3
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -145,6 +145,15 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/pskr-ingest
 
 %changelog
+* Sun May 17 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.3-1
+- solar-history-load: extend the v4.0.2 NOAA Kp schema fix to the SFI
+  30-day endpoint, which underwent the same array-of-objects migration
+  but was missed in v4.0.2. Replaces .[1:][]/.[0]/.[1] positional indexing
+  with .time_tag/.flux field access. Also drops the leftover "length - 1"
+  header-row counts for both Kp and SFI display lines.
+- Discovered by the morning-health-check PCS plugin pilot on its first
+  run — see KI7MT/fleet-ops/plugins/morning-health-check.
+
 * Tue Apr 28 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.2-1
 - rbn-download: separate upstream archive gaps (HTTP 404) from real failures;
   the 11 known historical RBN gap days no longer trip the systemd timer with
