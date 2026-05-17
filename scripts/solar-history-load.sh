@@ -64,11 +64,11 @@ if $DO_DOWNLOAD; then
     printf "  X-ray 7-day:  %s records\n" "$XRAY_COUNT"
 
     curl -sS -o "$KP_FILE" "$KP_URL"
-    KP_COUNT=$(jq 'length - 1' "$KP_FILE")  # subtract header row
+    KP_COUNT=$(jq 'length' "$KP_FILE")  # array-of-objects, no header row
     printf "  Kp 7-day:     %s records\n" "$KP_COUNT"
 
     curl -sS -o "$SFI_FILE" "$SFI_URL"
-    SFI_COUNT=$(jq 'length - 1' "$SFI_FILE")  # subtract header row
+    SFI_COUNT=$(jq 'length' "$SFI_FILE")  # array-of-objects, no header row
     printf "  SFI 30-day:   %s records\n" "$SFI_COUNT"
 fi
 
@@ -141,10 +141,13 @@ printf "  Loaded %s Kp records\n" "$KP_ROWS"
 # ─────────────────────────────────────────────────────────────────────────────
 printf "[%s] Processing F10.7 solar flux data...\n" "$(date '+%Y-%m-%d %H:%M:%S')"
 
+# NOAA SWPC SFI endpoint switched to array-of-objects (same migration as Kp):
+#   [{"time_tag":"2026-04-17T20:00:00","flux":107}, ...]
+# No header row, fields by key.
 # Expand daily SFI into 8 3-hourly rows so every bucket has flux data
 SFI_CSV=$(jq -r '
-  .[1:][]
-  | {date: .[0][:10], flux: (.[1] | tonumber)}
+  .[]
+  | {date: .time_tag[:10], flux: (.flux | tonumber)}
   | . as $d
   | range(0; 24; 3)
   | "\($d.date)\t\($d.date) \(if . < 10 then "0" else "" end)\(.):00:00\t\($d.flux)\t0\t0\t0\t0\tnoaa_sfi_30day.json\t0\t0"
