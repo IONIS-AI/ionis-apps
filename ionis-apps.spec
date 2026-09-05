@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.0.3
+Version:        4.0.4
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -145,6 +145,13 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/pskr-ingest
 
 %changelog
+* Sat Sep 05 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.4-1
+- dscovr-ingest: migrate to NOAA RTSW endpoints (json/rtsw/rtsw_{mag,wind}_1m.json)
+- NOAA retired /products/solar-wind/ entirely; ingest had failed since 2026-06-30
+- Filter on the `active` spacecraft flag (feed now carries SOLAR1/ACE/IMAP concurrently)
+- Record originating spacecraft per-row in source_file
+- Fetch window is now ~24h, not 7d — outages beyond 24h need OMNIWeb backfill
+
 * Sun May 17 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.3-1
 - solar-history-load: extend the v4.0.2 NOAA Kp schema fix to the SFI
   30-day endpoint, which underwent the same array-of-objects migration

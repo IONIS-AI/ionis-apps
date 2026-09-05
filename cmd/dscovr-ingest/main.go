@@ -1,12 +1,35 @@
-// dscovr-ingest - DSCOVR L1 solar wind data ingestion into ClickHouse
+// dscovr-ingest - L1 real-time solar wind ingestion into ClickHouse
 //
-// Downloads rolling 7-day magnetometer (Bz, Bt, Bx, By) and plasma
-// (speed, density, temperature) JSON from NOAA SWPC and inserts into
-// ClickHouse solar.dscovr. ReplacingMergeTree handles deduplication
-// across overlapping 7-day windows.
+// Downloads rolling magnetometer (Bz, Bt, Bx, By) and plasma (speed,
+// density, temperature) JSON from NOAA SWPC and inserts into ClickHouse
+// solar.dscovr. ReplacingMergeTree handles deduplication across
+// overlapping fetch windows.
 //
-// Source: https://services.swpc.noaa.gov/products/solar-wind/
-// Format: 2D JSON arrays with header row + string data rows
+// Source: https://services.swpc.noaa.gov/json/rtsw/
+// Format: JSON array of objects, typed values, newest-first
+//
+// ENDPOINT MIGRATION (v4.0.4, 2026-09-05). NOAA retired the entire
+// /products/solar-wind/ path — mag-7-day.json and plasma-7-day.json both 404,
+// as does the directory index. Ingest had been failing every 15 minutes since
+// 2026-06-30, leaving a two-month hole in solar.dscovr that nobody saw because
+// the fleet health check was itself dead. Three things changed, and only the
+// first is a URL swap:
+//
+//  1. Shape: was a 2D array with a header row and every value a STRING. Now a
+//     flat array of objects with real JSON types and null for missing values.
+//
+//  2. Provenance: the feed is no longer DSCOVR-only. It carries SOLAR1, ACE and
+//     IMAP concurrently — ~2.5 rows per minute-slot — with `active` marking the
+//     authoritative spacecraft. We MUST filter on active, or ReplacingMergeTree
+//     (ORDER BY date,time) silently collapses three spacecraft into whichever
+//     row merged last. Filtering active yields exactly one row per minute.
+//     The originating spacecraft is now recorded per-row in source_file, so the
+//     table no longer implies DSCOVR for data that may be ACE or IMAP.
+//
+//  3. Window: was 7 days per fetch, now ~24 hours. The 15-minute timer gives
+//     ample overlap, but an outage longer than 24h is now UNRECOVERABLE from
+//     this endpoint — it has no history. Backfill requires NASA OMNIWeb
+//     (omni_hro_1min), which is a different, time-shifted product.
 //
 // Build: CGO_ENABLED=0 go build -ldflags="-s -w" -o build/dscovr-ingest ./cmd/dscovr-ingest
 
@@ -23,7 +46,6 @@ import (
 	"os"
 	"os/signal"
 	"sort"
-	"strconv"
 	"syscall"
 	"time"
 
@@ -34,14 +56,19 @@ import (
 var Version = "dev"
 
 const (
-	magURL    = "https://services.swpc.noaa.gov/products/solar-wind/mag-7-day.json"
-	plasmaURL = "https://services.swpc.noaa.gov/products/solar-wind/plasma-7-day.json"
-	sourceTag = "dscovr-7day"
+	magURL    = "https://services.swpc.noaa.gov/json/rtsw/rtsw_mag_1m.json"
+	plasmaURL = "https://services.swpc.noaa.gov/json/rtsw/rtsw_wind_1m.json"
+	// Fallback tag for rows whose spacecraft the feed does not name.
+	sourceTag = "rtsw-1m"
 )
 
 // DscovrRecord holds merged magnetometer + plasma data for one timestamp.
 type DscovrRecord struct {
-	Time        time.Time
+	Time time.Time
+	// Source is the originating spacecraft (SOLAR1, ACE, IMAP) as reported by
+	// the feed. Stored per-row so a table named "dscovr" cannot silently imply
+	// DSCOVR for data that came from somewhere else.
+	Source      string
 	BzGSM       float32
 	Bt          float32
 	BxGSM       float32
@@ -110,29 +137,30 @@ func (b *DscovrBatch) AddRow(rec *DscovrRecord) {
 	b.Speed.Append(rec.Speed)
 	b.Density.Append(rec.Density)
 	b.Temperature.Append(rec.Temperature)
-	b.SourceFile.Append(sourceTag)
+	src := rec.Source
+	if src == "" {
+		src = sourceTag
+	} else {
+		src = sourceTag + "/" + src
+	}
+	b.SourceFile.Append(src)
 }
 
-// parseFloat32 parses a string to float32, returning 0 on error or null.
-func parseFloat32(s string) float32 {
-	if s == "" || s == "null" {
-		return 0
-	}
-	v, err := strconv.ParseFloat(s, 32)
-	if err != nil {
-		return 0
-	}
-	return float32(v)
-}
-
-// parseTimestamp parses NOAA SWPC time format: "2026-02-21 22:22:00.000"
 func parseTimestamp(s string) (time.Time, error) {
-	t, err := time.Parse("2006-01-02 15:04:05.000", s)
-	if err != nil {
-		// Try without milliseconds
-		t, err = time.Parse("2006-01-02 15:04:05", s)
+	// RTSW emits "2026-09-05T18:18:00" (T-separated, no zone, UTC implied). The
+	// space-separated forms are the retired /products/ layout, kept so a
+	// re-pointed or archived feed still parses.
+	for _, layout := range []string{
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04:05Z07:00",
+		"2006-01-02 15:04:05.000",
+		"2006-01-02 15:04:05",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
 	}
-	return t, err
+	return time.Time{}, fmt.Errorf("unrecognised timestamp %q", s)
 }
 
 // fetchJSON downloads a URL and returns the body bytes.
@@ -157,23 +185,62 @@ func fetchJSON(url string, timeout time.Duration) ([]byte, error) {
 
 // parseMag parses magnetometer JSON into the record map.
 // Format: [["time_tag","bx_gsm","by_gsm","bz_gsm","lon_gsm","lat_gsm","bt"], ...]
+// rtswMag is one record of rtsw_mag_1m.json. Numeric fields are pointers because
+// the feed emits null for a missing sample; a plain float32 would silently read 0,
+// which for Bz is a real physical value (northward/neutral IMF) and would look like
+// valid quiet-field data rather than a gap.
+type rtswMag struct {
+	TimeTag string   `json:"time_tag"`
+	Active  bool     `json:"active"`
+	Source  string   `json:"source"`
+	Bt      *float32 `json:"bt"`
+	BxGSM   *float32 `json:"bx_gsm"`
+	ByGSM   *float32 `json:"by_gsm"`
+	BzGSM   *float32 `json:"bz_gsm"`
+}
+
+// rtswWind is one record of rtsw_wind_1m.json. Same null-vs-zero reasoning: a
+// proton density of 0 is not physical, so a null must not become one.
+type rtswWind struct {
+	TimeTag     string   `json:"time_tag"`
+	Active      bool     `json:"active"`
+	Source      string   `json:"source"`
+	Speed       *float32 `json:"proton_speed"`
+	Density     *float32 `json:"proton_density"`
+	Temperature *float32 `json:"proton_temperature"`
+}
+
+// deref returns the pointed-to value, or 0 when the feed sent null. The column is
+// Float32 DEFAULT 0 and every prior row used the same convention, so this keeps
+// the existing contract rather than changing the table's meaning in a bugfix.
+func deref(f *float32) float32 {
+	if f == nil {
+		return 0
+	}
+	return *f
+}
+
 func parseMag(data []byte, records map[time.Time]*DscovrRecord) (int, error) {
-	var rows [][]string
+	var rows []rtswMag
 	if err := json.Unmarshal(data, &rows); err != nil {
 		return 0, fmt.Errorf("mag JSON parse: %w", err)
 	}
-	if len(rows) < 2 {
+	if len(rows) == 0 {
 		return 0, fmt.Errorf("mag JSON: no data rows")
 	}
 
 	count := 0
-	for i := 1; i < len(rows); i++ {
-		row := rows[i]
-		if len(row) < 7 {
+	for i := range rows {
+		row := &rows[i]
+
+		// Only the active spacecraft is authoritative. Without this the feed
+		// delivers SOLAR1, ACE and IMAP for the same minute and the last one
+		// merged would win, non-deterministically.
+		if !row.Active {
 			continue
 		}
 
-		t, err := parseTimestamp(row[0])
+		t, err := parseTimestamp(row.TimeTag)
 		if err != nil {
 			continue
 		}
@@ -183,37 +250,40 @@ func parseMag(data []byte, records map[time.Time]*DscovrRecord) (int, error) {
 			rec = &DscovrRecord{Time: t}
 			records[t] = rec
 		}
+		if rec.Source == "" {
+			rec.Source = row.Source
+		}
 
-		rec.BxGSM = parseFloat32(row[1])
-		rec.ByGSM = parseFloat32(row[2])
-		rec.BzGSM = parseFloat32(row[3])
-		// row[4] = lon_gsm, row[5] = lat_gsm — not stored
-		rec.Bt = parseFloat32(row[6])
+		rec.Bt = deref(row.Bt)
+		rec.BxGSM = deref(row.BxGSM)
+		rec.ByGSM = deref(row.ByGSM)
+		rec.BzGSM = deref(row.BzGSM)
 		count++
 	}
 
+	if count == 0 {
+		return 0, fmt.Errorf("mag JSON: %d rows but none active — feed shape may have changed", len(rows))
+	}
 	return count, nil
 }
 
-// parsePlasma parses plasma JSON into the record map.
-// Format: [["time_tag","density","speed","temperature"], ...]
 func parsePlasma(data []byte, records map[time.Time]*DscovrRecord) (int, error) {
-	var rows [][]string
+	var rows []rtswWind
 	if err := json.Unmarshal(data, &rows); err != nil {
 		return 0, fmt.Errorf("plasma JSON parse: %w", err)
 	}
-	if len(rows) < 2 {
+	if len(rows) == 0 {
 		return 0, fmt.Errorf("plasma JSON: no data rows")
 	}
 
 	count := 0
-	for i := 1; i < len(rows); i++ {
-		row := rows[i]
-		if len(row) < 4 {
+	for i := range rows {
+		row := &rows[i]
+		if !row.Active {
 			continue
 		}
 
-		t, err := parseTimestamp(row[0])
+		t, err := parseTimestamp(row.TimeTag)
 		if err != nil {
 			continue
 		}
@@ -223,13 +293,19 @@ func parsePlasma(data []byte, records map[time.Time]*DscovrRecord) (int, error) 
 			rec = &DscovrRecord{Time: t}
 			records[t] = rec
 		}
+		if rec.Source == "" {
+			rec.Source = row.Source
+		}
 
-		rec.Density = parseFloat32(row[1])
-		rec.Speed = parseFloat32(row[2])
-		rec.Temperature = parseFloat32(row[3])
+		rec.Density = deref(row.Density)
+		rec.Speed = deref(row.Speed)
+		rec.Temperature = deref(row.Temperature)
 		count++
 	}
 
+	if count == 0 {
+		return 0, fmt.Errorf("plasma JSON: %d rows but none active — feed shape may have changed", len(rows))
+	}
 	return count, nil
 }
 
@@ -250,7 +326,7 @@ func main() {
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "dscovr-ingest v%s — DSCOVR L1 Solar Wind Ingester\n\n", Version)
-		fmt.Fprintf(os.Stderr, "Downloads 7-day magnetometer + plasma JSON from NOAA SWPC\n")
+		fmt.Fprintf(os.Stderr, "Downloads rolling ~24h magnetometer + plasma JSON from NOAA SWPC\n")
 		fmt.Fprintf(os.Stderr, "and inserts into ClickHouse solar.dscovr.\n\n")
 		fmt.Fprintf(os.Stderr, "Sources:\n")
 		fmt.Fprintf(os.Stderr, "  %s\n", magURL)
