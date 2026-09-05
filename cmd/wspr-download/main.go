@@ -17,6 +17,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,9 +46,12 @@ const (
 type downloadStats struct {
 	Completed atomic.Uint64
 	Failed    atomic.Uint64
-	Skipped   atomic.Uint64
-	Updated   atomic.Uint64
-	Bytes     atomic.Uint64
+	// Missing counts archives wsprnet has not published. Tracked apart from Failed so
+	// "upstream has no data yet" cannot masquerade as "our download broke".
+	Missing atomic.Uint64
+	Skipped atomic.Uint64
+	Updated atomic.Uint64
+	Bytes   atomic.Uint64
 }
 
 // remoteETag does a HEAD request and returns the ETag header value.
@@ -64,7 +69,7 @@ func remoteETag(ctx context.Context, client *http.Client, url string) (string, e
 	resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return "", fmt.Errorf("not found (404)")
+		return "", errNotPublished
 	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
@@ -101,7 +106,7 @@ func downloadFile(ctx context.Context, client *http.Client, url, destPath string
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return 0, fmt.Errorf("not found (404)")
+		return 0, errNotPublished
 	}
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
@@ -133,6 +138,18 @@ func downloadFile(ctx context.Context, client *http.Client, url, destPath string
 
 	return n, nil
 }
+
+// errNotPublished marks an archive wsprnet.org has not published. It is NOT a failure:
+// generateFileList always enumerates through the CURRENT month, so the in-progress month
+// is guaranteed to 404 until wsprnet finalises it. Treating that as an error made this
+// unit go red at the start of every single month, by construction — and when wsprnet
+// stopped publishing entirely after 2026-05, it went permanently red. Three months of a
+// red unit that was reporting upstream's state correctly is how an alarm gets ignored.
+//
+// A 404 is never something a retry can fix, so it must not gate the exit code. It is
+// still reported by name in the summary, and the real signal for "we are missing data"
+// is bronze-table staleness in the health check, not this process's exit status.
+var errNotPublished = errors.New("not published upstream (404)")
 
 func generateFileList(startYear, startMonth, endYear, endMonth int) []string {
 	var files []string
@@ -260,6 +277,11 @@ func main() {
 
 	// Worker pool
 	sem := make(chan struct{}, *workers)
+	// Collected under a mutex so the summary can name the unpublished months rather than
+	// just counting them — "which months are missing" is the operator's actual question.
+	var missingMu sync.Mutex
+	var missingFiles []string
+
 	var wg sync.WaitGroup
 
 	for _, filename := range files {
@@ -315,7 +337,13 @@ func main() {
 			}
 
 			size, err := downloadFile(ctx, client, url, destPath)
-			if err != nil {
+			if errors.Is(err, errNotPublished) {
+				fmt.Printf("[%s] not published upstream yet\n", fname)
+				stats.Missing.Add(1)
+				missingMu.Lock()
+				missingFiles = append(missingFiles, fname)
+				missingMu.Unlock()
+			} else if err != nil {
 				fmt.Printf("[%s] FAILED: %v\n", fname, err)
 				stats.Failed.Add(1)
 			} else {
@@ -333,6 +361,7 @@ func main() {
 	elapsed := time.Since(startTime)
 	completed := stats.Completed.Load()
 	failed := stats.Failed.Load()
+	missing := stats.Missing.Load()
 	skipped := stats.Skipped.Load()
 	bytes := stats.Bytes.Load()
 
@@ -341,6 +370,9 @@ func main() {
 	fmt.Printf("  Downloaded: %d files (%s)\n", completed, formatBytes(int64(bytes)))
 	fmt.Printf("  Skipped:    %d (unchanged)\n", skipped)
 	fmt.Printf("  Failed:     %d\n", failed)
+	if missing > 0 {
+		fmt.Printf("  Missing:    %d (not published upstream)\n", missing)
+	}
 	fmt.Printf("  Elapsed:    %v\n", elapsed.Round(time.Second))
 	if completed > 0 && elapsed.Seconds() > 0 {
 		fmt.Printf("  Speed:      %.2f MB/s\n", float64(bytes)/elapsed.Seconds()/1024/1024)
@@ -348,7 +380,20 @@ func main() {
 	if failed > 0 {
 		fmt.Println("  Run again to resume failed files.")
 	}
+	if missing > 0 {
+		sort.Strings(missingFiles)
+		fmt.Println()
+		fmt.Printf("  Not published upstream (%d) — nothing to retry, wsprnet has not released these:\n", missing)
+		for _, f := range missingFiles {
+			fmt.Printf("    %s\n", f)
+		}
+		fmt.Println("  This is upstream state, not a local failure. Data-gap alerting belongs to")
+		fmt.Println("  bronze-table staleness in the health check, not to this exit code.")
+	}
 
+	// Exit non-zero ONLY for failures a retry could plausibly fix. An unpublished month
+	// is upstream's state; failing on it makes the unit permanently red and trains
+	// operators to ignore it — which is exactly what happened here for three months.
 	if failed > 0 {
 		os.Exit(1)
 	}
