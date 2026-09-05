@@ -202,16 +202,25 @@ func atoiDefault(s string) int {
 	return 0
 }
 
-// existingIDs returns the ids we ALREADY hold for a day's minute<10 window. This is what
-// makes the tool idempotent against a MergeTree with no dedup — re-running a day inserts
-// nothing rather than duplicating it.
+// existingIDs returns the ids we ALREADY hold for the whole day — deliberately NOT just
+// the minute<10 window we fetch. This is what makes the tool idempotent against a
+// MergeTree with no dedup.
+//
+// Scoping this to minute<10 (the first version) let 1,522 duplicates through on a real
+// run. wspr.live sometimes carries the SAME spot id at two timestamps a minute apart —
+// e.g. id 9346106285 at both 17:59:00 and 18:00:00. We already held the :59 copy from
+// the CSV, but a minute<10 lookup could not see it, so the :00 copy was inserted as
+// "new". Widening the lookup to the full day closes that: an id we hold at ANY minute
+// counts as held.
 func existingIDs(ctx context.Context, conn *ch.Client, table string, day time.Time) (map[uint64]struct{}, error) {
 	next := day.AddDate(0, 0, 1)
-	ids := make(map[uint64]struct{}, 1<<17)
+	ids := make(map[uint64]struct{}, 1<<21)
 	var col proto.ColUInt64
+	// Widened by one hour on each side as well: a cross-midnight duplicate pair (23:59
+	// / 00:00) is the same failure one day boundary over.
 	err := conn.Do(ctx, ch.Query{
-		Body: fmt.Sprintf(`SELECT id FROM %s WHERE timestamp >= '%s' AND timestamp < '%s' AND toMinute(timestamp) < 10`,
-			table, day.Format("2006-01-02"), next.Format("2006-01-02")),
+		Body: fmt.Sprintf(`SELECT id FROM %s WHERE timestamp >= toDateTime('%s') - INTERVAL 1 HOUR AND timestamp < toDateTime('%s') + INTERVAL 1 HOUR`,
+			table, day.Format("2006-01-02 15:04:05"), next.Format("2006-01-02 15:04:05")),
 		Result: proto.Results{{Name: "id", Data: &col}},
 		OnResult: func(ctx context.Context, b proto.Block) error {
 			for _, v := range col {
@@ -369,11 +378,20 @@ func main() {
 			continue
 		}
 
+		// Two filters, not one. `have` covers ids already in the table; `seen` covers
+		// ids repeated WITHIN this fetch — wspr.live can return the same id twice in a
+		// single response, and without this the batch duplicates itself on insert.
 		fresh := spots[:0:0]
+		seen := make(map[uint64]struct{}, len(spots))
 		for _, s := range spots {
-			if _, ok := have[s.ID]; !ok {
-				fresh = append(fresh, s)
+			if _, ok := have[s.ID]; ok {
+				continue
 			}
+			if _, ok := seen[s.ID]; ok {
+				continue
+			}
+			seen[s.ID] = struct{}{}
+			fresh = append(fresh, s)
 		}
 
 		if !*dryRun && len(fresh) > 0 {
