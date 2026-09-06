@@ -15,7 +15,12 @@ Wants=network-online.target
 Type=oneshot
 User=ki7mt
 Group=ki7mt
-ExecStart=/usr/bin/wspr-live-download -dest /mnt/wspr-data/live -delay 5s
+# -delay 60s, not the tool's default 5s. What matters is DUTY CYCLE, not the gap: each
+# day is ~156 MB and occupies wspr.live for ~19s, so a 5s gap means we are pulling 79% of
+# the time. At 60s it is 24%. The nightly job only fetches the settle window (~3 days), so
+# the slower pace costs us about three minutes and leaves their service alone the rest of
+# the time. There is no deadline on our side; there is a volunteer on theirs.
+ExecStart=/usr/bin/wspr-live-download -dest /mnt/wspr-data/live -delay 60s
 StandardOutput=journal
 StandardError=journal
 TimeoutStartSec=3600

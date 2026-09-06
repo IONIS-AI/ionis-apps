@@ -125,7 +125,7 @@ func main() {
 		startStr = flag.String("start", "", "Start date YYYY-MM-DD (default: settle window)")
 		endStr   = flag.String("end", "", "End date YYYY-MM-DD exclusive (default: today)")
 		settle   = flag.Int("settle-days", 3, "Re-fetch days newer than this; older days on disk are never re-requested")
-		delay    = flag.Duration("delay", 5*time.Second, "Pause between requests — be kind to a volunteer service")
+		delay    = flag.Duration("delay", 60*time.Second, "Pause between requests. Default keeps duty cycle ~24%: a day is ~156 MB and holds the connection ~19s, so a short gap means near-continuous pull.")
 		maxDays  = flag.Int("max-days", 0, "Stop after N days this run (0 = no limit)")
 		timeout  = flag.Duration("timeout", 300*time.Second, "HTTP timeout per day")
 		dryRun   = flag.Bool("dry-run", false, "Report what would be fetched, request nothing")
