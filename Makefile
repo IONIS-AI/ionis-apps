@@ -50,7 +50,7 @@ DISTDIR      := dist
 # =============================================================================
 # Note: Legacy tools (wspr-ingest, wspr-ingest-cpu, wspr-ingest-fast) removed
 #       due to clickhouse-go/v2 API incompatibility. Replaced by faster tools.
-WSPR_CMDS    := wspr-shredder wspr-turbo wspr-parquet-native wspr-download
+WSPR_CMDS    := wspr-shredder wspr-turbo wspr-parquet-native wspr-download wspr-backfill wspr-live-download wspr-live-ingest
 SOLAR_CMDS   := solar-ingest solar-download solar-backfill dscovr-ingest
 CONTEST_CMDS := contest-download rbn-download rbn-ingest contest-ingest
 PSKR_CMDS    := pskr-collector pskr-ingest

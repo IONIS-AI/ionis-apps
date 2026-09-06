@@ -1,0 +1,22 @@
+# Download half of the WSPR pipeline: wspr.live -> /mnt/wspr-data/live/YYYY/MM/DD.jsonl.gz
+#
+# Runs BEFORE wspr-live-ingest (20:00 vs 20:30) so the files exist when ingest looks.
+#
+# Fetches only what is missing plus the settle window. A day already on disk and older
+# than -settle-days is never requested again, so steady-state load on wspr.live is a few
+# days per night rather than a full re-query — and a ClickHouse rebuild costs them
+# nothing, because the archive is already local.
+[Unit]
+Description=WSPR spot download from wspr.live to local archive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ki7mt
+Group=ki7mt
+ExecStart=/usr/bin/wspr-live-download -dest /mnt/wspr-data/live -delay 5s
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=3600
+Restart=no
