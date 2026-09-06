@@ -1,0 +1,38 @@
+# WSPR ingest from wspr.live — the PRIMARY WSPR source since 2026-09.
+#
+# WHY THIS REPLACED THE CSV PATH. wsprnet.org's monthly CSV archive has two independent
+# problems, and only one of them is expected to be fixed:
+#
+#   1. Since 2023-10-16 the export drops most spots in the first ~10 minutes of every
+#      hour (~14% of all spots). Unintentional, still present in the last file shipped,
+#      never acknowledged upstream.
+#   2. On 2026-05-25 W1BW disabled the nightly CSV dumps entirely to free disk space,
+#      stating it would be back "this week". As of 2026-09 it has not returned.
+#
+# Problem 2 may resolve at any time. Problem 1 almost certainly will NOT resolve with it —
+# they are unrelated faults, and the defect survived in every file wsprnet published for
+# nearly three years. So wsprnet returning does NOT make the CSV path trustworthy again,
+# and this unit stays primary regardless.
+#
+# Pulls a 3-DAY trailing window, not just yesterday. WSPR receivers upload a minute or two
+# after each decode, so the most recent spots keep arriving after the day closes. A
+# too-narrow window is precisely the mistake that produced wsprnet's own defect. The
+# ingester is idempotent (inserts only ids not already held), so overlap costs bandwidth
+# and nothing else.
+
+[Unit]
+Description=WSPR spot ingest from wspr.live (primary source)
+Documentation=https://github.com/IONIS-AI/ionis-apps/blob/main/cmd/wspr-backfill/main.go
+After=network-online.target clickhouse-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ki7mt
+Group=ki7mt
+# START_DAYS_AGO=3 — trailing window for late-arriving spots.
+ExecStart=/bin/sh -c '/usr/bin/wspr-backfill -all-minutes -start "$(date -u -d "3 days ago" +%%Y-%%m-%%d)" -delay 2s'
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=3600
+Restart=no

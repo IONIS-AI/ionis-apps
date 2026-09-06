@@ -1,0 +1,13 @@
+# Fires daily. 19:00 UTC deliberately follows the old wspr-download slot (18:00) so the
+# two never contend if the CSV path is ever re-enabled alongside this one.
+[Unit]
+Description=Daily WSPR ingest from wspr.live
+
+[Timer]
+OnCalendar=19:00:00
+Persistent=true
+RandomizedDelaySec=300
+Unit=wspr-live-ingest.service
+
+[Install]
+WantedBy=timers.target

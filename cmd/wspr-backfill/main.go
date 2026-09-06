@@ -101,18 +101,26 @@ type spot struct {
 // existing convention here and fix the whole column deliberately, later.
 func writeFreq(mhz float64) uint64 { return uint64(mhz) }
 
-// fetchDay pulls minute<10 spots for a single UTC day from wspr.live.
-func fetchDay(ctx context.Context, client *http.Client, day time.Time) ([]spot, error) {
+// fetchDay pulls spots for a single UTC day. By default only minute<10 — the slots
+// wsprnet's export drops. allMinutes widens it to the whole hour, which is required for
+// any month wsprnet never published AT ALL: there the CSV contributed nothing, so
+// restricting to minute<10 leaves :10-:59 entirely empty. That is exactly what happened
+// on the first production run for 2026-06 onward.
+func fetchDay(ctx context.Context, client *http.Client, day time.Time, allMinutes bool) ([]spot, error) {
 	next := day.AddDate(0, 0, 1)
+	minuteClause := " AND toMinute(time) < 10"
+	if allMinutes {
+		minuteClause = ""
+	}
 	// JSONEachRow keeps parsing streaming and per-row, so a malformed row is isolated
 	// rather than poisoning a whole day's decode.
 	q := fmt.Sprintf(`SELECT id, toString(time) AS t, rx_sign, rx_loc, snr, frequency,
 	                         tx_sign, tx_loc, power, drift, distance, azimuth, version, code
 	                  FROM wspr.rx
-	                  WHERE time >= '%s' AND time < '%s' AND toMinute(time) < 10
+	                  WHERE time >= '%s' AND time < '%s'%s
 	                  ORDER BY id
 	                  FORMAT JSONEachRow`,
-		day.Format("2006-01-02"), next.Format("2006-01-02"))
+		day.Format("2006-01-02"), next.Format("2006-01-02"), minuteClause)
 
 	req, err := http.NewRequestWithContext(ctx, "GET",
 		liveEndpoint+"?query="+url.QueryEscape(q), nil)
@@ -312,6 +320,7 @@ func main() {
 		timeout  = flag.Duration("timeout", 180*time.Second, "HTTP timeout per day")
 		dryRun   = flag.Bool("dry-run", false, "Fetch and map, but do not insert")
 		state    = flag.String("state", "", "Checkpoint file for resume (default: none)")
+		allMin   = flag.Bool("all-minutes", false, "Fetch the WHOLE hour, not just minute<10. Required for months wsprnet never published at all, where the CSV contributed nothing.")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "wspr-backfill v%s — recover WSPR spots wsprnet never published\n\n", Version)
@@ -362,7 +371,7 @@ func main() {
 			break
 		}
 
-		spots, err := fetchDay(ctx, client, d)
+		spots, err := fetchDay(ctx, client, d, *allMin)
 		if err != nil {
 			// Do NOT checkpoint a failed day: leaving it unmarked is what makes a
 			// resume correct rather than silently skipping a hole.
