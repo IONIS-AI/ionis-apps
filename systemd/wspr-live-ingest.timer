@@ -1,0 +1,14 @@
+# Fires daily at 20:30 UTC. The existing WSPR chain already occupies 18:00
+# (wspr-download) and 19:00 (wspr-turbo ingest), so this sits clear of both — the CSV path
+# can be re-enabled beside it without contention for ClickHouse or the network.
+[Unit]
+Description=Daily WSPR ingest from wspr.live
+
+[Timer]
+OnCalendar=20:30:00
+Persistent=true
+RandomizedDelaySec=300
+Unit=wspr-live-ingest.service
+
+[Install]
+WantedBy=timers.target

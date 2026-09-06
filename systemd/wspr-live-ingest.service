@@ -1,0 +1,20 @@
+# Ingest half of the WSPR pipeline: local .jsonl.gz -> wspr.bronze, with watermark.
+#
+# Runs after wspr-live-download. Idempotent on two keys: the ingest_log watermark skips
+# unchanged files outright, and an id-set skips rows already held when a settling day's
+# file has grown. wspr.bronze is a plain MergeTree with no dedup, so the second key is
+# load-bearing, not defensive.
+[Unit]
+Description=WSPR spot ingest from local archive into ClickHouse
+After=network-online.target clickhouse-server.service wspr-live-download.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ki7mt
+Group=ki7mt
+ExecStart=/usr/bin/wspr-live-ingest -src /mnt/wspr-data/live -host 10.60.1.1:9000
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=3600
+Restart=no

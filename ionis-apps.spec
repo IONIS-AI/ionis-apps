@@ -45,6 +45,8 @@ maximum throughput. Benchmarks on Threadripper 9975WX:
 %package wspr
 Summary:        WSPR data processing tools
 Requires:       %{name} = %{version}-%{release}
+BuildRequires:  systemd-rpm-macros
+%{?systemd_requires}
 Obsoletes:      ki7mt-ai-lab-apps-wspr < 3.0.0
 Provides:       ki7mt-ai-lab-apps-wspr = %{version}-%{release}
 
@@ -55,7 +57,16 @@ WSPR (Weak Signal Propagation Reporter) data processing applications:
 - wspr-turbo:          Zero-copy streaming ingester for .gz archives (8.8 Mrps)
                        Supports --full, --prime, --dry-run with watermark tracking.
 - wspr-parquet-native: Native Parquet file ingester (8.4 Mrps)
-- wspr-download:       Parallel archive downloader from wsprnet.org
+- wspr-download:       Parallel archive downloader from wsprnet.org (LEGACY)
+- wspr-live-download: Fetch spots from wspr.live/wsprdaemon to dated .jsonl.gz files
+- wspr-live-ingest:   Load those files into wspr.bronze with ingest_log watermark
+- wspr-backfill:      One-shot recovery tool (fused fetch+insert; superseded by the pair)
+
+wspr-backfill is the PRIMARY WSPR ingest path as of 4.0.4. wsprnet's monthly CSV
+export has dropped most spots in the first ~10 minutes of every hour since
+2023-10-16, and stopped publishing entirely on 2026-05-25. wspr-download is
+retained for the day the archives return, but the export defect is a separate,
+unfixed fault, so the CSV path is no longer authoritative.
 
 All ingestion tools use ch-go native protocol with LZ4 compression.
 
@@ -112,6 +123,18 @@ make all VERSION=%{version}
 %install
 make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 
+# systemd units. Historically every unit on the fleet was hand-copied into
+# /etc/systemd/system and owned by no package — `rpm -qf` on wspr-download.service
+# returns "not owned by any package", so upgrades never touched it and removal would
+# have orphaned it. Packaging them here starts closing that: the units travel with the
+# binary they invoke, and a version bump can no longer leave a unit pointing at a flag
+# the new binary does not accept.
+install -d -m 0755 %{buildroot}%{_unitdir}
+install -p -m 0644 systemd/wspr-live-download.service %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/wspr-live-download.timer   %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/wspr-live-ingest.service   %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/wspr-live-ingest.timer     %{buildroot}%{_unitdir}/
+
 %files
 %license COPYING
 %doc README.md
@@ -124,6 +147,22 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 %{_bindir}/wspr-turbo
 %{_bindir}/wspr-parquet-native
 %{_bindir}/wspr-download
+%{_bindir}/wspr-backfill
+%{_bindir}/wspr-live-download
+%{_bindir}/wspr-live-ingest
+%{_unitdir}/wspr-live-download.service
+%{_unitdir}/wspr-live-download.timer
+%{_unitdir}/wspr-live-ingest.service
+%{_unitdir}/wspr-live-ingest.timer
+
+%post wspr
+%systemd_post wspr-live-download.timer wspr-live-ingest.timer
+
+%preun wspr
+%systemd_preun wspr-live-download.timer wspr-live-ingest.timer
+
+%postun wspr
+%systemd_postun_with_restart wspr-live-download.timer wspr-live-ingest.timer
 
 %files solar
 %{_bindir}/solar-ingest

@@ -1,0 +1,27 @@
+# Download half of the WSPR pipeline: wspr.live -> /mnt/wspr-data/live/YYYY/MM/DD.jsonl.gz
+#
+# Runs BEFORE wspr-live-ingest (20:00 vs 20:30) so the files exist when ingest looks.
+#
+# Fetches only what is missing plus the settle window. A day already on disk and older
+# than -settle-days is never requested again, so steady-state load on wspr.live is a few
+# days per night rather than a full re-query — and a ClickHouse rebuild costs them
+# nothing, because the archive is already local.
+[Unit]
+Description=WSPR spot download from wspr.live to local archive
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ki7mt
+Group=ki7mt
+# -delay 60s, not the tool's default 5s. What matters is DUTY CYCLE, not the gap: each
+# day is ~156 MB and occupies wspr.live for ~19s, so a 5s gap means we are pulling 79% of
+# the time. At 60s it is 24%. The nightly job only fetches the settle window (~3 days), so
+# the slower pace costs us about three minutes and leaves their service alone the rest of
+# the time. There is no deadline on our side; there is a volunteer on theirs.
+ExecStart=/usr/bin/wspr-live-download -dest /mnt/wspr-data/live -delay 60s
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=3600
+Restart=no
