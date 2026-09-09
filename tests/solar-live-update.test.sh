@@ -29,10 +29,20 @@ setup() {
     mkdir -p "$WORK/bin" "$WORK/raw"
     cat > "$WORK/bin/clickhouse-client" <<'EOF'
 #!/bin/bash
-while [[ $# -gt 0 ]]; do [[ "$1" == "--query" ]] && { echo "$2" >> "$CH_LOG"; shift; }; shift; done
+# Records SQL instead of running it. Answers the engine probe from $CH_ENGINE so the
+# migration branch can be exercised both ways without a database.
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "--query" ]]; then
+    echo "$2" >> "$CH_LOG"
+    [[ "$2" == *"FROM system.tables"* ]] && echo "$CH_ENGINE"
+    shift
+  fi
+  shift
+done
 EOF
     chmod +x "$WORK/bin/clickhouse-client"
     export CH_LOG="$WORK/ch.sql"
+    export CH_ENGINE="${CH_ENGINE:-MergeTree}"
     : > "$CH_LOG"
 }
 teardown() { rm -rf "$WORK"; }
@@ -134,6 +144,38 @@ xray_fixture
 rc=$(run_script)
 check "exits non-zero when the SFI file is absent" "$([[ $rc -ne 0 ]] && echo yes || echo no)" "yes"
 check "wrote nothing to ClickHouse" "$(wc -c < "$CH_LOG" | tr -d ' ')" "0"
+teardown
+
+# ── durability: the table must not be volatile ─────────────────────────────
+# It was ENGINE = Memory, dropped and recreated every run. Memory is lost on every
+# ClickHouse restart, and it does not come back stale — it comes back EMPTY, which
+# ionis-hamstats turns into an invented SFI 100 / Kp 3 for the IONIS model.
+echo "== a Memory table is converted to durable MergeTree =="
+setup_engine() { CH_ENGINE="$1"; setup; }
+CH_ENGINE=Memory setup
+echo "[{\"flux\":110,\"time_tag\":\"$NOW\"}]" > "$WORK/raw/noaa_solar_flux.json"
+echo "[{\"time_tag\":\"$NOW\",\"Kp\":2.67,\"a_running\":12}]" > "$WORK/raw/noaa_kp_index.json"
+xray_fixture
+rc=$(run_script)
+check "exits 0" "$rc" "0"
+check "drops the volatile table" "$(grep -c 'DROP TABLE IF EXISTS wspr.live_conditions' "$CH_LOG")" "1"
+check "recreates it as MergeTree" "$(grep -c 'ENGINE = MergeTree' "$CH_LOG")" "1"
+check "with a durable ORDER BY" "$(grep -c 'ORDER BY updated_at' "$CH_LOG")" "1"
+check "says what it is doing" "$(grep -c "converting to durable MergeTree" "$WORK/out")" "1"
+teardown
+
+echo "== an already-durable table is left alone =="
+CH_ENGINE=MergeTree setup
+echo "[{\"flux\":110,\"time_tag\":\"$NOW\"}]" > "$WORK/raw/noaa_solar_flux.json"
+echo "[{\"time_tag\":\"$NOW\",\"Kp\":2.67,\"a_running\":12}]" > "$WORK/raw/noaa_kp_index.json"
+xray_fixture
+rc=$(run_script)
+check "exits 0" "$rc" "0"
+check "does NOT drop the table" "$(grep -c 'DROP TABLE' "$CH_LOG")" "0"
+check "does NOT recreate it" "$(grep -c 'CREATE TABLE' "$CH_LOG")" "0"
+# The whole point of appending: replacing would discard the history this now keeps.
+check "does NOT truncate" "$(grep -c 'TRUNCATE' "$CH_LOG")" "0"
+check "appends a row" "$(grep -c 'INSERT INTO wspr.live_conditions' "$CH_LOG")" "1"
 teardown
 
 echo
