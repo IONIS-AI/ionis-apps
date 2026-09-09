@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.0.5
+Version:        4.0.6
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -241,6 +241,23 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Wed Sep 09 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.6-1
+- solar-live-update: live SFI and Kp were fabricated, not measured. NOAA SWPC moved the
+  10cm-flux and planetary-K endpoints to array-of-objects (~Apr 2026); both parsers still
+  expected the retired shapes, and jq ERRORS on them rather than returning null, so `// 0`
+  never fired and 2>/dev/null ate the evidence. SFI fell through to a hardcoded 145 and Kp
+  to 0 -- a legal Kp, so it read as "quiet" rather than as a failure -- and the unit printed
+  "updated successfully" and exited 0 every 15 minutes. solar-history-load was fixed for
+  this same migration, which is why solar.bronze stayed correct while the live table did not.
+- solar-live-update: removed the SFI_FALLBACK=145 constant. Missing or unparseable input now
+  fails the run and leaves the previous row alone rather than overwriting real data with a
+  plausible-looking guess.
+- solar-live-update: ap_index was never parsed at all and was written as a hardcoded 0;
+  a_running is in the same Kp record. Added Kp 0-9 and SFI 60-400 sfu range checks.
+- wspr.live_conditions carried no timestamp of any kind, so a consumer reading 145 had no
+  way to ask how old it was. Adds sfi_observed_at / kp_observed_at (NOAA's own time_tags)
+  and updated_at. The table is DROP+CREATEd, since the three-column version is still
+  resident wherever ClickHouse has not restarted.
 * Tue Sep 09 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.5-1
 - contest-download: discover published years per site; the hardcoded YearMax and the
   hand-kept ARRL instance-ID map are gone. 156 published year-sets discovered against
