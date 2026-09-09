@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.0.6
+Version:        4.0.7
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -241,6 +241,25 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Wed Sep 09 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.7-1
+- solar-live-update: wspr.live_conditions was ENGINE = Memory, dropped and recreated on
+  every run. Memory is lost on every ClickHouse restart, and it does not come back stale --
+  it comes back EMPTY. ionis-hamstats reads solar_row.get("solar_flux", 100) and
+  .get("kp_index", 3), so for up to 15 minutes after each restart the IONIS model ran on an
+  invented SFI 100 / Kp 3 and the public site published those band predictions as current
+  conditions. Same fabricated-number pattern as the SFI_FALLBACK=145 removed in 4.0.6.
+- solar-live-update: converts the table to a durable append-only MergeTree, once and
+  idempotently. CREATE TABLE IF NOT EXISTS cannot change an engine, so the script probes
+  system.tables and converts only when it finds something other than MergeTree; this
+  self-applies across the fleet with no migration step, and a host still holding the old
+  Memory table would otherwise fail its INSERT every 15 minutes.
+- solar-live-update: appends one row per run instead of replacing a single row, giving a
+  15-minute record of live conditions rather than a volatile snapshot (~35k rows/year,
+  TTL 2 years). Readers must ORDER BY updated_at DESC LIMIT 1; ionis-hamstats and
+  ionis-docs are updated to match.
+- Schema is authoritative in ionis-core 25-live_conditions.sql (also updated); the copy in
+  the script exists only so a host whose DDL has not been re-applied can self-heal.
+- tests/solar-live-update.test.sh: 30 checks, up from 20.
 * Wed Sep 09 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.6-1
 - solar-live-update: live SFI and Kp were fabricated, not measured. NOAA SWPC moved the
   10cm-flux and planetary-K endpoints to array-of-objects (~Apr 2026); both parsers still
