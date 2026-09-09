@@ -1,0 +1,9 @@
+[Unit]
+Description=Solar live conditions update (NOAA SWPC)
+After=network-online.target clickhouse-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/solar-live-update --refresh
+User=ki7mt

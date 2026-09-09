@@ -1,0 +1,9 @@
+[Unit]
+Description=PSK Reporter incremental ingest
+After=clickhouse-server.service pskr-collector.service
+Requires=clickhouse-server.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/pskr-ingest --src /mnt/pskr-data --host 192.168.1.90:9000
+User=ki7mt

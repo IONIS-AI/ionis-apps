@@ -1,0 +1,9 @@
+[Unit]
+Description=DSCOVR L1 solar wind ingest
+After=network-online.target clickhouse-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/dscovr-ingest -ch-host 192.168.1.90:9000
+User=ki7mt

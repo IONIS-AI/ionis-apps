@@ -1,0 +1,8 @@
+[Unit]
+Description=WSPR incremental ingest
+After=clickhouse-server.service wspr-download.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/wspr-turbo --source-dir /mnt/wspr-data --ch-host 192.168.1.90:9000
+User=ki7mt

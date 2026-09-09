@@ -1,0 +1,9 @@
+[Unit]
+Description=WSPR ingest daily at 19:00 UTC (1hr after download)
+
+[Timer]
+OnCalendar=19:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

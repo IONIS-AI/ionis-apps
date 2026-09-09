@@ -134,6 +134,21 @@ install -p -m 0644 systemd/wspr-live-download.service %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-live-download.timer   %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-live-ingest.service   %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-live-ingest.timer     %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/wspr-turbo.service             %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/wspr-turbo.timer               %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/dscovr-ingest.service          %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/dscovr-ingest.timer            %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-live-update.service      %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-live-update.timer        %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-history-load.service     %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-history-load.timer       %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/rbn-download.service           %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/rbn-download.timer             %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/rbn-ingest.service             %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/rbn-ingest.timer               %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/pskr-collector.service         %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/pskr-ingest.service            %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir}/
 
 %files
 %license COPYING
@@ -154,15 +169,17 @@ install -p -m 0644 systemd/wspr-live-ingest.timer     %{buildroot}%{_unitdir}/
 %{_unitdir}/wspr-live-download.timer
 %{_unitdir}/wspr-live-ingest.service
 %{_unitdir}/wspr-live-ingest.timer
+%{_unitdir}/wspr-turbo.service
+%{_unitdir}/wspr-turbo.timer
 
 %post wspr
-%systemd_post wspr-live-download.timer wspr-live-ingest.timer
+%systemd_post wspr-live-download.timer wspr-live-ingest.timer wspr-turbo.timer
 
 %preun wspr
-%systemd_preun wspr-live-download.timer wspr-live-ingest.timer
+%systemd_preun wspr-live-download.timer wspr-live-ingest.timer wspr-turbo.timer
 
 %postun wspr
-%systemd_postun_with_restart wspr-live-download.timer wspr-live-ingest.timer
+%systemd_postun_with_restart wspr-live-download.timer wspr-live-ingest.timer wspr-turbo.timer
 
 %files solar
 %{_bindir}/solar-ingest
@@ -172,16 +189,56 @@ install -p -m 0644 systemd/wspr-live-ingest.timer     %{buildroot}%{_unitdir}/
 %{_bindir}/solar-refresh
 %{_bindir}/solar-live-update
 %{_bindir}/solar-history-load
+%{_unitdir}/dscovr-ingest.service
+%{_unitdir}/dscovr-ingest.timer
+%{_unitdir}/solar-live-update.service
+%{_unitdir}/solar-live-update.timer
+%{_unitdir}/solar-history-load.service
+%{_unitdir}/solar-history-load.timer
+
+%post solar
+%systemd_post dscovr-ingest.timer solar-live-update.timer solar-history-load.timer
+
+%preun solar
+%systemd_preun dscovr-ingest.timer solar-live-update.timer solar-history-load.timer
+
+%postun solar
+%systemd_postun_with_restart dscovr-ingest.timer solar-live-update.timer solar-history-load.timer
 
 %files contest
 %{_bindir}/contest-download
 %{_bindir}/contest-ingest
+%{_unitdir}/rbn-download.service
+%{_unitdir}/rbn-download.timer
+%{_unitdir}/rbn-ingest.service
+%{_unitdir}/rbn-ingest.timer
+
+%post contest
+%systemd_post rbn-download.timer rbn-ingest.timer
+
+%preun contest
+%systemd_preun rbn-download.timer rbn-ingest.timer
+
+%postun contest
+%systemd_postun_with_restart rbn-download.timer rbn-ingest.timer
 %{_bindir}/rbn-download
 %{_bindir}/rbn-ingest
 
 %files pskr
 %{_bindir}/pskr-collector
 %{_bindir}/pskr-ingest
+%{_unitdir}/pskr-collector.service
+%{_unitdir}/pskr-ingest.service
+%{_unitdir}/pskr-ingest.timer
+
+%post pskr
+%systemd_post pskr-ingest.timer pskr-collector.service
+
+%preun pskr
+%systemd_preun pskr-ingest.timer pskr-collector.service
+
+%postun pskr
+%systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
 * Sat Sep 05 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.4-1
