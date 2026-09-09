@@ -224,6 +224,11 @@ var logLinkRe = regexp.MustCompile(`href=['"]([^'"]+\.log)['"]`)
 // while downloading nothing — 72 ARRL year-indexes, silently empty. Capturing the
 // whole query string instead of one named parameter handles both forms and will
 // not need touching if they change the parameter names again.
+// ARRL prints its own count on each year index. Holding the parse to that number
+// turns "the regex silently matched fewer links than exist" into a hard failure -
+// the partial-parse cousin of the zero-parse bug, and just as quiet.
+var arrlCountRe = regexp.MustCompile(`Number of logs found[^:]*:\s*([\d,]+)`)
+
 var arrlLogRe = regexp.MustCompile(`showpubliclog\.php\?([^"]+)"[^>]*>([^<]+)</a>`)
 
 // logEntry holds a callsign and optional ARRL hash for manifest storage.
@@ -323,6 +328,7 @@ func main() {
 	}
 
 	var work []workItem
+	discoveryFailed := 0
 	for _, c := range contests {
 		if *contestKey != "all" && c.Key != *contestKey {
 			continue
@@ -335,6 +341,7 @@ func main() {
 			if derr != nil {
 				fmt.Printf("  WARNING: %s: instance-ID discovery failed (%v) - using the built-in map\n", c.Name, derr)
 				discovered = c.YearIIDs
+				discoveryFailed++
 			}
 			c.YearIIDs = discovered
 			for y := range discovered {
@@ -348,6 +355,7 @@ func main() {
 			fmt.Printf("  %s: site publishes %d-%d (%d years)\n", c.Name, years[0], years[len(years)-1], len(years))
 		} else {
 			fmt.Printf("  WARNING: %s: no published years discovered\n", c.Name)
+			discoveryFailed++
 		}
 
 		for _, y := range years {
@@ -528,7 +536,10 @@ func main() {
 		fmt.Println("  Run again to resume.")
 	}
 
-	if totalFailed > 0 {
+	if discoveryFailed > 0 {
+		fmt.Printf("  Discovery failures: %d (a series fell back to the built-in map or found nothing)\n", discoveryFailed)
+	}
+	if totalFailed > 0 || discoveryFailed > 0 {
 		os.Exit(1)
 	}
 }
@@ -634,11 +645,28 @@ func fetchARRLIndex(ctx context.Context, client *http.Client, url string) ([]log
 	if err != nil {
 		return nil, err
 	}
-	return parseARRLIndex(body), nil
+	entries := parseARRLIndex(body)
+	if want := arrlAdvertisedCount(body); want >= 0 && len(entries) != want {
+		return nil, fmt.Errorf("index advertises %d logs but parsed %d - parser is stale or partial", want, len(entries))
+	}
+	return entries, nil
 }
 
 // parseARRLIndex extracts callsign and hash pairs from ARRL HTML.
 // Format: showpubliclog.php?q=HASH" target="_new">CALLSIGN</a>
+// arrlAdvertisedCount returns the log count the index page states, or -1.
+func arrlAdvertisedCount(html []byte) int {
+	m := arrlCountRe.FindSubmatch(html)
+	if m == nil {
+		return -1
+	}
+	n, err := strconv.Atoi(strings.ReplaceAll(string(m[1]), ",", ""))
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
 func parseARRLIndex(html []byte) []logEntry {
 	matches := arrlLogRe.FindAllSubmatch(html, -1)
 	seen := make(map[string]bool, len(matches))
