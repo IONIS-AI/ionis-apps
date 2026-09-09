@@ -1,0 +1,8 @@
+[Unit]
+Description=RBN incremental ingest
+After=clickhouse-server.service rbn-download.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rbn-ingest --src /mnt/rbn-data --host 192.168.1.90:9000
+User=ki7mt

@@ -1,0 +1,9 @@
+[Unit]
+Description=RBN ingest daily at 16:30 UTC (30min after download)
+
+[Timer]
+OnCalendar=16:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

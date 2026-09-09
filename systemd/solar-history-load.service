@@ -1,0 +1,9 @@
+[Unit]
+Description=Solar history load (7-day X-ray/Kp/SFI refresh)
+After=network-online.target clickhouse-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/solar-history-load --download
+User=ki7mt
