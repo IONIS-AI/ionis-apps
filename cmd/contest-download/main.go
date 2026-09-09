@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -43,12 +44,12 @@ type Contest struct {
 	Key       string
 	Name      string
 	BaseURL   string
-	Modes     []string       // e.g. ["ph","cw"] or nil for single-mode contests
+	Modes     []string // e.g. ["ph","cw"] or nil for single-mode contests
 	YearMin   int
 	YearMax   int
-	IndexType string         // "cq" (directory listing) or "arrl" (hash-based)
-	EID       int            // ARRL event ID (only for IndexType "arrl")
-	YearIIDs  map[int]int    // ARRL year → instance ID (only for IndexType "arrl")
+	IndexType string      // "cq" (directory listing) or "arrl" (hash-based)
+	EID       int         // ARRL event ID (only for IndexType "arrl")
+	YearIIDs  map[int]int // ARRL year → instance ID (only for IndexType "arrl")
 }
 
 var contests = []Contest{
@@ -214,13 +215,26 @@ var contests = []Contest{
 var logLinkRe = regexp.MustCompile(`href=['"]([^'"]+\.log)['"]`)
 
 // arrlLogRe extracts callsign+hash pairs from ARRL public log pages.
-// Format: <a href="showpubliclog.php?q=HASH" target="_new">CALLSIGN</a>
-var arrlLogRe = regexp.MustCompile(`showpubliclog\.php\?q=([^"]+)"[^>]*>([^<]+)</a>`)
+// ARRL moved from hash-based log links to parameter-based ones:
+//
+//	old: <a href="showpubliclog.php?q=HASH" target="_new">CALLSIGN</a>
+//	new: <a href="showpubliclog.php?cn=dxcw&yr=2018&call=2E0CVN" target="_new">CALLSIGN</a>
+//
+// The old pattern matched zero links against the new pages and reported success
+// while downloading nothing — 72 ARRL year-indexes, silently empty. Capturing the
+// whole query string instead of one named parameter handles both forms and will
+// not need touching if they change the parameter names again.
+// ARRL prints its own count on each year index. Holding the parse to that number
+// turns "the regex silently matched fewer links than exist" into a hard failure -
+// the partial-parse cousin of the zero-parse bug, and just as quiet.
+var arrlCountRe = regexp.MustCompile(`Number of logs found[^:]*:\s*([\d,]+)`)
+
+var arrlLogRe = regexp.MustCompile(`showpubliclog\.php\?([^"]+)"[^>]*>([^<]+)</a>`)
 
 // logEntry holds a callsign and optional ARRL hash for manifest storage.
 type logEntry struct {
 	Callsign string
-	Hash     string // ARRL only; empty for CQ
+	Hash     string // ARRL only: the log link's full query string. Empty for CQ.
 }
 
 func main() {
@@ -314,19 +328,41 @@ func main() {
 	}
 
 	var work []workItem
+	discoveryFailed := 0
 	for _, c := range contests {
 		if *contestKey != "all" && c.Key != *contestKey {
 			continue
 		}
-		for y := c.YearMin; y <= c.YearMax; y++ {
+		// Ask the site what it publishes rather than trusting a hardcoded ceiling.
+		// c is a range copy, so reassigning YearIIDs here is local to this pass.
+		var years []int
+		if c.IndexType == "arrl" {
+			discovered, derr := discoverARRLYears(ctx, client, c)
+			if derr != nil {
+				fmt.Printf("  WARNING: %s: instance-ID discovery failed (%v) - using the built-in map\n", c.Name, derr)
+				discovered = c.YearIIDs
+				discoveryFailed++
+			}
+			c.YearIIDs = discovered
+			for y := range discovered {
+				years = append(years, y)
+			}
+			sort.Ints(years)
+		} else {
+			var probeFailures int
+			years, probeFailures = discoverCQYears(ctx, client, c, time.Now().UTC().Year()+1, *delay)
+			discoveryFailed += probeFailures
+		}
+		if len(years) > 0 {
+			fmt.Printf("  %s: site publishes %d-%d (%d years)\n", c.Name, years[0], years[len(years)-1], len(years))
+		} else {
+			fmt.Printf("  WARNING: %s: no published years discovered\n", c.Name)
+			discoveryFailed++
+		}
+
+		for _, y := range years {
 			if *year != 0 && y != *year {
 				continue
-			}
-			// For ARRL, skip years that don't have an iid mapping
-			if c.IndexType == "arrl" {
-				if _, ok := c.YearIIDs[y]; !ok {
-					continue
-				}
 			}
 			if len(c.Modes) > 0 {
 				for _, m := range c.Modes {
@@ -356,6 +392,14 @@ func main() {
 
 	if len(work) == 0 {
 		fmt.Println("No matching contest/year/mode combinations found.")
+		// Returning here used to skip the summary and exit 0. If discovery failed
+		// for every source, "nothing to do" and "we could not find out what to do"
+		// looked identical to a scheduler, which is the failure this whole exercise
+		// is about.
+		if discoveryFailed > 0 {
+			fmt.Printf("  Discovery failures: %d - the empty work list is NOT evidence there is nothing to fetch\n", discoveryFailed)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -405,6 +449,19 @@ func main() {
 			if err != nil {
 				fmt.Printf("  WARNING: index fetch failed: %v (skipping)\n", err)
 				fmt.Println()
+				totalFailed++
+				sleepWithContext(ctx, *delay)
+				continue
+			}
+
+			// A 200 that yields zero entries is a parser that no longer matches
+			// the page, not a contest with no logs. Treating those as success is
+			// how 72 ARRL year-indexes reported "Downloaded: 0, Failed: 0" while
+			// the site was advertising 3,968 logs apiece.
+			if len(fetched) == 0 {
+				fmt.Printf("  ERROR: index returned 200 but parsed 0 log links - parser likely stale for this site\n")
+				fmt.Println()
+				totalFailed++
 				sleepWithContext(ctx, *delay)
 				continue
 			}
@@ -453,7 +510,7 @@ func main() {
 			var logURL string
 			switch w.contest.IndexType {
 			case "arrl":
-				logURL = w.contest.BaseURL + "showpubliclog.php?q=" + e.Hash
+				logURL = w.contest.BaseURL + "showpubliclog.php?" + e.Hash
 			default:
 				logURL = w.contest.BaseURL + w.subdir + "/" + e.Callsign + ".log"
 			}
@@ -489,12 +546,90 @@ func main() {
 		fmt.Println("  Run again to resume.")
 	}
 
-	if totalFailed > 0 {
+	if discoveryFailed > 0 {
+		fmt.Printf("  Discovery failures: %d (a series fell back to the built-in map or found nothing)\n", discoveryFailed)
+	}
+	if totalFailed > 0 || discoveryFailed > 0 {
 		os.Exit(1)
 	}
 }
 
 // fetchCQIndex fetches a CQ-style directory listing and extracts .log links.
+// ---------------------------------------------------------------------------
+// Year discovery
+//
+// Every source used to carry a hardcoded YearMax, and every ARRL source a
+// hand-written map of per-year instance IDs. Both were a standing promise to
+// edit this file every January. Nobody did, and nothing measured the result:
+// cq-ww stopped at 2016 while cqww.com went on publishing through 2025, and
+// iaru-hf stopped at 2021 even though its instance IDs were already sitting in
+// the map. Thirty-two year-sets went missing that way, roughly 115M QSOs.
+//
+// The sites already know what they publish. Ask them.
+// ---------------------------------------------------------------------------
+
+var arrlIIDRe = regexp.MustCompile(`iid=(\d+)[^>]*>\s*([^<]*?(20\d{2})[^<]*?)<`)
+
+// discoverARRLYears reads an event's public-logs page and returns year -> instance ID.
+func discoverARRLYears(ctx context.Context, client *http.Client, c Contest) (map[int]int, error) {
+	url := fmt.Sprintf("%spubliclogs.php?eid=%d", c.BaseURL, c.EID)
+	body, err := httpGet(ctx, client, url)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", url, err)
+	}
+	out := make(map[int]int)
+	for _, m := range arrlIIDRe.FindAllSubmatch(body, -1) {
+		iid, err1 := strconv.Atoi(string(m[1]))
+		yr, err2 := strconv.Atoi(string(m[3]))
+		if err1 != nil || err2 != nil || yr < 1990 || yr > 2100 {
+			continue
+		}
+		// Keep the lowest iid per year: a page can link the same instance more
+		// than once, and the first occurrence is the canonical results link.
+		if prev, ok := out[yr]; !ok || iid < prev {
+			out[yr] = iid
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s: no instance IDs found", url)
+	}
+	return out, nil
+}
+
+// discoverCQYears probes the site for the year directories it actually serves.
+// discoverCQYears probes the site for the year directories it actually serves.
+// It returns the years found and the number of probes that failed for a reason
+// other than 404. That distinction is the whole point: a 404 means the site does
+// not publish that year, while a timeout or a 500 means we could not find out.
+// Collapsing them made a site outage look identical to a site with no archive,
+// and the run reported success either way.
+func discoverCQYears(ctx context.Context, client *http.Client, c Contest, ceiling int, delay time.Duration) ([]int, int) {
+	var years []int
+	probeFailures := 0
+	for y := c.YearMin; y <= ceiling; y++ {
+		subdirs := []string{fmt.Sprintf("%d", y)}
+		if len(c.Modes) > 0 {
+			subdirs = nil
+			for _, m := range c.Modes {
+				subdirs = append(subdirs, fmt.Sprintf("%d%s", y, m))
+			}
+		}
+		for _, sd := range subdirs {
+			_, err := httpGet(ctx, client, c.BaseURL+sd+"/")
+			if err == nil {
+				years = append(years, y)
+				break
+			}
+			if !strings.Contains(err.Error(), "HTTP 404") {
+				fmt.Printf("  WARNING: %s %s: probe failed (%v) - cannot tell if this year is published\n", c.Name, sd, err)
+				probeFailures++
+			}
+			sleepWithContext(ctx, delay)
+		}
+	}
+	return years, probeFailures
+}
+
 func fetchCQIndex(ctx context.Context, client *http.Client, url string) ([]logEntry, error) {
 	body, err := httpGet(ctx, client, url)
 	if err != nil {
@@ -532,18 +667,35 @@ func fetchARRLIndex(ctx context.Context, client *http.Client, url string) ([]log
 	if err != nil {
 		return nil, err
 	}
-	return parseARRLIndex(body), nil
+	entries := parseARRLIndex(body)
+	if want := arrlAdvertisedCount(body); want >= 0 && len(entries) != want {
+		return nil, fmt.Errorf("index advertises %d logs but parsed %d - parser is stale or partial", want, len(entries))
+	}
+	return entries, nil
 }
 
 // parseARRLIndex extracts callsign and hash pairs from ARRL HTML.
 // Format: showpubliclog.php?q=HASH" target="_new">CALLSIGN</a>
+// arrlAdvertisedCount returns the log count the index page states, or -1.
+func arrlAdvertisedCount(html []byte) int {
+	m := arrlCountRe.FindSubmatch(html)
+	if m == nil {
+		return -1
+	}
+	n, err := strconv.Atoi(strings.ReplaceAll(string(m[1]), ",", ""))
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
 func parseARRLIndex(html []byte) []logEntry {
 	matches := arrlLogRe.FindAllSubmatch(html, -1)
 	seen := make(map[string]bool, len(matches))
 	var entries []logEntry
 
 	for _, m := range matches {
-		hash := string(m[1])
+		hash := strings.ReplaceAll(string(m[1]), "&amp;", "&")
 		callsign := strings.TrimSpace(string(m[2]))
 		callsign = strings.ToLower(callsign)
 		// Normalize callsign for filename safety (replace / with -)
@@ -674,6 +826,12 @@ func readManifest(path string) ([]logEntry, error) {
 		e := logEntry{Callsign: parts[0]}
 		if len(parts) == 2 {
 			e.Hash = parts[1]
+			// Manifests written before ARRL moved to parameter-based links hold a
+			// bare hash. Reusing one would build showpubliclog.php?<hash>, which
+			// 404s for every log in the year. Discard the cache and re-fetch.
+			if e.Hash != "" && !strings.Contains(e.Hash, "=") {
+				return nil, fmt.Errorf("manifest predates the ARRL URL change (bare hash %q) - delete it to re-fetch", e.Hash)
+			}
 		}
 		entries = append(entries, e)
 	}

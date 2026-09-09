@@ -1,16 +1,21 @@
+# Compiled binaries land at the REPO ROOT, so these are anchored with a leading /.
+# Unanchored, `contest-ingest` also matched the directory cmd/contest-ingest/, and every
+# new file added there was silently dropped from commits -- a test file vanished from a
+# commit that reported success. git add reported it as ignored; nothing else did.
+
 # Build outputs
 bin/
 build/
 dist/
 
 # Go binaries (built in repo root)
-contest-ingest
-rbn-ingest
-wspr-turbo
-pskr-ingest
-solar-*
-wspr-download
-wspr-shredder
+/contest-ingest
+/rbn-ingest
+/wspr-turbo
+/pskr-ingest
+/solar-*
+/wspr-download
+/wspr-shredder
 *.exe
 *.exe~
 *.dll
