@@ -548,7 +548,7 @@ func flushQuarantine(ctx context.Context, conn *ch.Client, rows []*QSO, filePath
 		return nil
 	}
 	var (
-		colTS   proto.ColDateTime
+		colTS   proto.ColStr
 		colFreq proto.ColUInt32
 		colBand proto.ColInt32
 		colMode = new(proto.ColStr).LowCardinality()
@@ -565,7 +565,7 @@ func flushQuarantine(ctx context.Context, conn *ch.Client, rows []*QSO, filePath
 		colWhy  = new(proto.ColStr).LowCardinality()
 	)
 	for _, q := range rows {
-		colTS.Append(q.Timestamp)
+		colTS.Append(q.Timestamp.UTC().Format(time.RFC3339))
 		colFreq.Append(q.Frequency)
 		colBand.Append(q.Band)
 		colMode.Append(q.Mode)
@@ -638,19 +638,39 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	startTime := time.Now()
 
 	declaredYear, haveYear := sourceDeclaredYear(src)
-	var held []*QSO
 
+	// Pass 1: classify. Nothing is written until the whole file's disposition is
+	// known. Interleaving the two writes meant a quarantine failure could leave
+	// already-flushed bronze rows behind with no watermark, so the retry inserted
+	// them a second time - the guard against duplicates creating duplicates.
+	var held, keep []*QSO
 	for _, qso := range qsos {
-		if ctx.Err() != nil {
-			return 0
-		}
-
-		// Hold back anything dated outside the year this directory claims.
 		if quarantineEnabled && haveYear && !inDeclaredYear(qso.Timestamp, declaredYear) {
 			qso.Contest = contestID
 			qso.Source = src
 			held = append(held, qso)
 			continue
+		}
+		keep = append(keep, qso)
+	}
+
+	// Pass 2: quarantine first. If it fails, not one bronze row exists yet, so the
+	// file is cleanly retryable as a whole.
+	if len(held) > 0 {
+		if err := flushQuarantine(ctx, conn, held, relPath, declaredYear, "off-declared-year"); err != nil {
+			log.Printf("[%s] quarantine insert FAILED (%v) - no rows written, file left unwatermarked for retry", relPath, err)
+			stats.FailedFiles.Add(1)
+			rejectWriter.Write(relPath, fmt.Sprintf("quarantine insert failed: %v", err))
+			return 0
+		}
+		stats.Quarantined.Add(uint64(len(held)))
+		rejectWriter.Write(relPath, fmt.Sprintf("%d QSO(s) dated outside declared year %d", len(held), declaredYear))
+	}
+
+	// Pass 3: bronze.
+	for _, qso := range keep {
+		if ctx.Err() != nil {
+			return 0
 		}
 
 		batch.Timestamp.Append(qso.Timestamp)
@@ -682,22 +702,6 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 			log.Printf("[%s] final flush error: %v", relPath, err)
 		}
 		batch.Reset()
-	}
-
-	if len(held) > 0 {
-		if err := flushQuarantine(ctx, conn, held, relPath, declaredYear, "off-declared-year"); err != nil {
-			// Do NOT watermark this file. Writing the watermark after a failed
-			// quarantine insert would mark it processed while its held rows were
-			// silently dropped, and every later incremental run would skip it —
-			// the loss would be permanent and invisible. Leaving the file
-			// unwatermarked means the next run retries it.
-			log.Printf("[%s] quarantine insert FAILED (%v) — file left unwatermarked for retry", relPath, err)
-			stats.FailedFiles.Add(1)
-			rejectWriter.Write(relPath, fmt.Sprintf("quarantine insert failed: %v", err))
-			return 0
-		}
-		stats.Quarantined.Add(uint64(len(held)))
-		rejectWriter.Write(relPath, fmt.Sprintf("%d QSO(s) dated outside declared year %d", len(held), declaredYear))
 	}
 
 	elapsed := time.Since(startTime)

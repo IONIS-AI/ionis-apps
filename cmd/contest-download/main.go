@@ -431,6 +431,19 @@ func main() {
 			if err != nil {
 				fmt.Printf("  WARNING: index fetch failed: %v (skipping)\n", err)
 				fmt.Println()
+				totalFailed++
+				sleepWithContext(ctx, *delay)
+				continue
+			}
+
+			// A 200 that yields zero entries is a parser that no longer matches
+			// the page, not a contest with no logs. Treating those as success is
+			// how 72 ARRL year-indexes reported "Downloaded: 0, Failed: 0" while
+			// the site was advertising 3,968 logs apiece.
+			if len(fetched) == 0 {
+				fmt.Printf("  ERROR: index returned 200 but parsed 0 log links - parser likely stale for this site\n")
+				fmt.Println()
+				totalFailed++
 				sleepWithContext(ctx, *delay)
 				continue
 			}
@@ -763,6 +776,12 @@ func readManifest(path string) ([]logEntry, error) {
 		e := logEntry{Callsign: parts[0]}
 		if len(parts) == 2 {
 			e.Hash = parts[1]
+			// Manifests written before ARRL moved to parameter-based links hold a
+			// bare hash. Reusing one would build showpubliclog.php?<hash>, which
+			// 404s for every log in the year. Discard the cache and re-fetch.
+			if e.Hash != "" && !strings.Contains(e.Hash, "=") {
+				return nil, fmt.Errorf("manifest predates the ARRL URL change (bare hash %q) - delete it to re-fetch", e.Hash)
+			}
 		}
 		entries = append(entries, e)
 	}
