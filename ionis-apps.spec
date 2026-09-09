@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.0.4
+Version:        4.0.5
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -241,6 +241,21 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Tue Sep 09 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.5-1
+- contest-download: discover published years per site; the hardcoded YearMax and the
+  hand-kept ARRL instance-ID map are gone. 156 published year-sets discovered against
+  122 held -- roughly 115M QSOs that were unreachable by configuration.
+- contest-download: fix ARRL log-link parsing. The site moved from showpubliclog.php?q=HASH
+  to ?cn=&yr=&call=; the old pattern matched zero links across all 72 ARRL year indexes
+  and reported "Downloaded: 0, Failed: 0" -- success while fetching nothing.
+- contest-download: a 200 parsing to zero links, a parse below the count the index
+  advertises, and a discovery failure are errors now, not silent successes.
+- contest-ingest: hold QSOs dated outside their source directory's year in
+  contest.quarantine. Requires ionis-core 37-contest_quarantine.sql.
+- contest-ingest: write quarantine before bronze, so a file whose quarantine insert
+  fails has written no rows and stays unwatermarked for retry.
+- Package the remaining 8 systemd units. 15 of 19 were hand-copied into
+  /etc/systemd/system and owned by no package; upgrades never touched them.
 * Sat Sep 05 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.4-1
 - dscovr-ingest: migrate to NOAA RTSW endpoints (json/rtsw/rtsw_{mag,wind}_1m.json)
 - NOAA retired /products/solar-wind/ entirely; ingest had failed since 2026-06-30
