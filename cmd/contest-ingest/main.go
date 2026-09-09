@@ -685,10 +685,18 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	}
 
 	if len(held) > 0 {
-		stats.Quarantined.Add(uint64(len(held)))
 		if err := flushQuarantine(ctx, conn, held, relPath, declaredYear, "off-declared-year"); err != nil {
-			log.Printf("[%s] quarantine insert error: %v", relPath, err)
+			// Do NOT watermark this file. Writing the watermark after a failed
+			// quarantine insert would mark it processed while its held rows were
+			// silently dropped, and every later incremental run would skip it —
+			// the loss would be permanent and invisible. Leaving the file
+			// unwatermarked means the next run retries it.
+			log.Printf("[%s] quarantine insert FAILED (%v) — file left unwatermarked for retry", relPath, err)
+			stats.FailedFiles.Add(1)
+			rejectWriter.Write(relPath, fmt.Sprintf("quarantine insert failed: %v", err))
+			return 0
 		}
+		stats.Quarantined.Add(uint64(len(held)))
 		rejectWriter.Write(relPath, fmt.Sprintf("%d QSO(s) dated outside declared year %d", len(held), declaredYear))
 	}
 

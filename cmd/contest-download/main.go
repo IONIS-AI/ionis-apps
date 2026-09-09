@@ -215,13 +215,21 @@ var contests = []Contest{
 var logLinkRe = regexp.MustCompile(`href=['"]([^'"]+\.log)['"]`)
 
 // arrlLogRe extracts callsign+hash pairs from ARRL public log pages.
-// Format: <a href="showpubliclog.php?q=HASH" target="_new">CALLSIGN</a>
-var arrlLogRe = regexp.MustCompile(`showpubliclog\.php\?q=([^"]+)"[^>]*>([^<]+)</a>`)
+// ARRL moved from hash-based log links to parameter-based ones:
+//
+//	old: <a href="showpubliclog.php?q=HASH" target="_new">CALLSIGN</a>
+//	new: <a href="showpubliclog.php?cn=dxcw&yr=2018&call=2E0CVN" target="_new">CALLSIGN</a>
+//
+// The old pattern matched zero links against the new pages and reported success
+// while downloading nothing — 72 ARRL year-indexes, silently empty. Capturing the
+// whole query string instead of one named parameter handles both forms and will
+// not need touching if they change the parameter names again.
+var arrlLogRe = regexp.MustCompile(`showpubliclog\.php\?([^"]+)"[^>]*>([^<]+)</a>`)
 
 // logEntry holds a callsign and optional ARRL hash for manifest storage.
 type logEntry struct {
 	Callsign string
-	Hash     string // ARRL only; empty for CQ
+	Hash     string // ARRL only: the log link's full query string. Empty for CQ.
 }
 
 func main() {
@@ -471,7 +479,7 @@ func main() {
 			var logURL string
 			switch w.contest.IndexType {
 			case "arrl":
-				logURL = w.contest.BaseURL + "showpubliclog.php?q=" + e.Hash
+				logURL = w.contest.BaseURL + "showpubliclog.php?" + e.Hash
 			default:
 				logURL = w.contest.BaseURL + w.subdir + "/" + e.Callsign + ".log"
 			}
@@ -624,7 +632,7 @@ func parseARRLIndex(html []byte) []logEntry {
 	var entries []logEntry
 
 	for _, m := range matches {
-		hash := string(m[1])
+		hash := strings.ReplaceAll(string(m[1]), "&amp;", "&")
 		callsign := strings.TrimSpace(string(m[2]))
 		callsign = strings.ToLower(callsign)
 		// Normalize callsign for filename safety (replace / with -)
