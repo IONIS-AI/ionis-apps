@@ -1,14 +1,14 @@
 #!/bin/bash
 # =============================================================================
 # Name............: solar-live-update
-# Version.........: 2.3.3
+# Version.........: 2.4.0
 # Description.....: Update live_conditions table for Now-Casting
 # Usage...........: solar-live-update [--refresh]
 #
 # This script:
 #   1. Optionally runs solar-refresh to get fresh data
 #   2. Extracts latest Kp, SFI, X-ray from downloaded JSON files
-#   3. Updates wspr.live_conditions table (Memory engine)
+#   3. Appends to wspr.live_conditions (durable MergeTree, 15-min resolution)
 #
 # For cron: Run every 15 minutes
 #   */15 * * * * /path/to/solar-live-update.sh >> /var/log/solar-live.log 2>&1
@@ -160,26 +160,50 @@ if (( $(echo "$XRAY_LONG > 0.00001" | bc -l 2>/dev/null) )); then
     CONDITIONS="$CONDITIONS + Radio Blackout"
 fi
 
-# Update ClickHouse live_conditions table (Memory engine — recreate if lost after restart)
+# Append to ClickHouse live_conditions (durable MergeTree)
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Updating live_conditions: Kp=$KP_INDEX, SFI=$SOLAR_FLUX, X-ray=$XRAY_LONG, $CONDITIONS"
 
-# The table carried NO timestamp of any kind, which is the second half of why this went
-# unnoticed: a consumer reading solar_flux=145 had no way to ask how old it was, and neither
-# did anyone looking at the table directly. sfi_observed_at / kp_observed_at are NOAA's own
-# time_tags for the samples used; updated_at is when this run wrote the row. Staleness is now
-# a readable fact rather than something you have to already suspect.
+# THE TABLE USED TO BE `ENGINE = Memory`, dropped and recreated by this script on every
+# run. Memory means it is gone on every ClickHouse restart, and it does not come back stale
+# — it comes back EMPTY, which downstream does not treat as "no data":
 #
-# DROP rather than CREATE IF NOT EXISTS: the old three-column table is still resident in
-# memory on any host that has not restarted ClickHouse, and IF NOT EXISTS would silently keep
-# it — the INSERT would then fail on unknown columns every 15 minutes. Memory engine holds
-# exactly one row that this script rewrites anyway, so there is nothing to preserve.
+#   ionis-hamstats: solar_row.get("solar_flux", 100) / .get("kp_index", 3)
+#
+# so the IONIS model ran against an invented SFI 100 / Kp 3 and the site published those
+# predictions as current conditions. Same shape as the SFI_FALLBACK=145 removed above, one
+# layer down. Durability is what closes that window.
+#
+# Schema is authoritative in ionis-core/src/25-live_conditions.sql; it is mirrored here only
+# so the script can self-heal a host whose DDL has not been re-applied. Keep the two in step.
+#
+# Convert once, then leave it alone. CREATE TABLE IF NOT EXISTS cannot change an engine, so a
+# host still holding the old Memory table would keep it forever — and, once this script stops
+# recreating the schema, would fail its INSERT on missing columns every 15 minutes. Checking
+# the engine makes the conversion idempotent and self-applying across the fleet.
+LC_ENGINE=$(clickhouse-client --query "
+    SELECT engine FROM system.tables WHERE database = 'wspr' AND name = 'live_conditions'
+" 2>/dev/null || echo "")
+
+if [[ "$LC_ENGINE" != "MergeTree" ]]; then
+    printf "[%s] live_conditions engine is '%s'; converting to durable MergeTree.\n" \
+        "$(date '+%Y-%m-%d %H:%M:%S')" "${LC_ENGINE:-absent}"
+    # Nothing is lost: a Memory table holds at most the one row this run is about to replace.
+    clickhouse-client --query "DROP TABLE IF EXISTS wspr.live_conditions"
+    clickhouse-client --query "
+        CREATE TABLE wspr.live_conditions (
+            kp_index Float32, ap_index Float32, solar_flux Float32,
+            xray_short Float64, xray_long Float64, conditions String,
+            sfi_observed_at DateTime, kp_observed_at DateTime, updated_at DateTime
+        ) ENGINE = MergeTree
+        ORDER BY updated_at
+        TTL updated_at + INTERVAL 2 YEAR"
+fi
+
+# APPEND, do not replace. One row per run at 15-minute resolution is a record of live
+# conditions rather than a single volatile snapshot — which is what the "live PSKR
+# validation" use case in the DDL header wants, and it was being thrown away every run.
+# ~35k rows/year. Readers take ORDER BY updated_at DESC LIMIT 1.
 clickhouse-client --query "
-    DROP TABLE IF EXISTS wspr.live_conditions;
-    CREATE TABLE wspr.live_conditions (
-        kp_index Float32, ap_index Float32, solar_flux Float32,
-        xray_short Float64, xray_long Float64, conditions String,
-        sfi_observed_at DateTime, kp_observed_at DateTime, updated_at DateTime
-    ) ENGINE = Memory;
     INSERT INTO wspr.live_conditions
         (kp_index, ap_index, solar_flux, xray_short, xray_long, conditions,
          sfi_observed_at, kp_observed_at, updated_at)
