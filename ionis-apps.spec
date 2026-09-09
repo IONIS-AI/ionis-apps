@@ -212,6 +212,8 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 %{_unitdir}/rbn-download.timer
 %{_unitdir}/rbn-ingest.service
 %{_unitdir}/rbn-ingest.timer
+%{_bindir}/rbn-download
+%{_bindir}/rbn-ingest
 
 %post contest
 %systemd_post rbn-download.timer rbn-ingest.timer
@@ -221,8 +223,6 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 
 %postun contest
 %systemd_postun_with_restart rbn-download.timer rbn-ingest.timer
-%{_bindir}/rbn-download
-%{_bindir}/rbn-ingest
 
 %files pskr
 %{_bindir}/pskr-collector
