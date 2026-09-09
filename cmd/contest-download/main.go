@@ -349,7 +349,9 @@ func main() {
 			}
 			sort.Ints(years)
 		} else {
-			years = discoverCQYears(ctx, client, c, time.Now().UTC().Year()+1, *delay)
+			var probeFailures int
+			years, probeFailures = discoverCQYears(ctx, client, c, time.Now().UTC().Year()+1, *delay)
+			discoveryFailed += probeFailures
 		}
 		if len(years) > 0 {
 			fmt.Printf("  %s: site publishes %d-%d (%d years)\n", c.Name, years[0], years[len(years)-1], len(years))
@@ -390,6 +392,14 @@ func main() {
 
 	if len(work) == 0 {
 		fmt.Println("No matching contest/year/mode combinations found.")
+		// Returning here used to skip the summary and exit 0. If discovery failed
+		// for every source, "nothing to do" and "we could not find out what to do"
+		// looked identical to a scheduler, which is the failure this whole exercise
+		// is about.
+		if discoveryFailed > 0 {
+			fmt.Printf("  Discovery failures: %d - the empty work list is NOT evidence there is nothing to fetch\n", discoveryFailed)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -587,8 +597,15 @@ func discoverARRLYears(ctx context.Context, client *http.Client, c Contest) (map
 }
 
 // discoverCQYears probes the site for the year directories it actually serves.
-func discoverCQYears(ctx context.Context, client *http.Client, c Contest, ceiling int, delay time.Duration) []int {
+// discoverCQYears probes the site for the year directories it actually serves.
+// It returns the years found and the number of probes that failed for a reason
+// other than 404. That distinction is the whole point: a 404 means the site does
+// not publish that year, while a timeout or a 500 means we could not find out.
+// Collapsing them made a site outage look identical to a site with no archive,
+// and the run reported success either way.
+func discoverCQYears(ctx context.Context, client *http.Client, c Contest, ceiling int, delay time.Duration) ([]int, int) {
 	var years []int
+	probeFailures := 0
 	for y := c.YearMin; y <= ceiling; y++ {
 		subdirs := []string{fmt.Sprintf("%d", y)}
 		if len(c.Modes) > 0 {
@@ -598,14 +615,19 @@ func discoverCQYears(ctx context.Context, client *http.Client, c Contest, ceilin
 			}
 		}
 		for _, sd := range subdirs {
-			if _, err := httpGet(ctx, client, c.BaseURL+sd+"/"); err == nil {
+			_, err := httpGet(ctx, client, c.BaseURL+sd+"/")
+			if err == nil {
 				years = append(years, y)
 				break
+			}
+			if !strings.Contains(err.Error(), "HTTP 404") {
+				fmt.Printf("  WARNING: %s %s: probe failed (%v) - cannot tell if this year is published\n", c.Name, sd, err)
+				probeFailures++
 			}
 			sleepWithContext(ctx, delay)
 		}
 	}
-	return years
+	return years, probeFailures
 }
 
 func fetchCQIndex(ctx context.Context, client *http.Client, url string) ([]logEntry, error) {
