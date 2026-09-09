@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -43,12 +44,12 @@ type Contest struct {
 	Key       string
 	Name      string
 	BaseURL   string
-	Modes     []string       // e.g. ["ph","cw"] or nil for single-mode contests
+	Modes     []string // e.g. ["ph","cw"] or nil for single-mode contests
 	YearMin   int
 	YearMax   int
-	IndexType string         // "cq" (directory listing) or "arrl" (hash-based)
-	EID       int            // ARRL event ID (only for IndexType "arrl")
-	YearIIDs  map[int]int    // ARRL year → instance ID (only for IndexType "arrl")
+	IndexType string      // "cq" (directory listing) or "arrl" (hash-based)
+	EID       int         // ARRL event ID (only for IndexType "arrl")
+	YearIIDs  map[int]int // ARRL year → instance ID (only for IndexType "arrl")
 }
 
 var contests = []Contest{
@@ -318,15 +319,32 @@ func main() {
 		if *contestKey != "all" && c.Key != *contestKey {
 			continue
 		}
-		for y := c.YearMin; y <= c.YearMax; y++ {
+		// Ask the site what it publishes rather than trusting a hardcoded ceiling.
+		// c is a range copy, so reassigning YearIIDs here is local to this pass.
+		var years []int
+		if c.IndexType == "arrl" {
+			discovered, derr := discoverARRLYears(ctx, client, c)
+			if derr != nil {
+				fmt.Printf("  WARNING: %s: instance-ID discovery failed (%v) - using the built-in map\n", c.Name, derr)
+				discovered = c.YearIIDs
+			}
+			c.YearIIDs = discovered
+			for y := range discovered {
+				years = append(years, y)
+			}
+			sort.Ints(years)
+		} else {
+			years = discoverCQYears(ctx, client, c, time.Now().UTC().Year()+1, *delay)
+		}
+		if len(years) > 0 {
+			fmt.Printf("  %s: site publishes %d-%d (%d years)\n", c.Name, years[0], years[len(years)-1], len(years))
+		} else {
+			fmt.Printf("  WARNING: %s: no published years discovered\n", c.Name)
+		}
+
+		for _, y := range years {
 			if *year != 0 && y != *year {
 				continue
-			}
-			// For ARRL, skip years that don't have an iid mapping
-			if c.IndexType == "arrl" {
-				if _, ok := c.YearIIDs[y]; !ok {
-					continue
-				}
 			}
 			if len(c.Modes) > 0 {
 				for _, m := range c.Modes {
@@ -495,6 +513,69 @@ func main() {
 }
 
 // fetchCQIndex fetches a CQ-style directory listing and extracts .log links.
+// ---------------------------------------------------------------------------
+// Year discovery
+//
+// Every source used to carry a hardcoded YearMax, and every ARRL source a
+// hand-written map of per-year instance IDs. Both were a standing promise to
+// edit this file every January. Nobody did, and nothing measured the result:
+// cq-ww stopped at 2016 while cqww.com went on publishing through 2025, and
+// iaru-hf stopped at 2021 even though its instance IDs were already sitting in
+// the map. Thirty-two year-sets went missing that way, roughly 115M QSOs.
+//
+// The sites already know what they publish. Ask them.
+// ---------------------------------------------------------------------------
+
+var arrlIIDRe = regexp.MustCompile(`iid=(\d+)[^>]*>\s*([^<]*?(20\d{2})[^<]*?)<`)
+
+// discoverARRLYears reads an event's public-logs page and returns year -> instance ID.
+func discoverARRLYears(ctx context.Context, client *http.Client, c Contest) (map[int]int, error) {
+	url := fmt.Sprintf("%spubliclogs.php?eid=%d", c.BaseURL, c.EID)
+	body, err := httpGet(ctx, client, url)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", url, err)
+	}
+	out := make(map[int]int)
+	for _, m := range arrlIIDRe.FindAllSubmatch(body, -1) {
+		iid, err1 := strconv.Atoi(string(m[1]))
+		yr, err2 := strconv.Atoi(string(m[3]))
+		if err1 != nil || err2 != nil || yr < 1990 || yr > 2100 {
+			continue
+		}
+		// Keep the lowest iid per year: a page can link the same instance more
+		// than once, and the first occurrence is the canonical results link.
+		if prev, ok := out[yr]; !ok || iid < prev {
+			out[yr] = iid
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s: no instance IDs found", url)
+	}
+	return out, nil
+}
+
+// discoverCQYears probes the site for the year directories it actually serves.
+func discoverCQYears(ctx context.Context, client *http.Client, c Contest, ceiling int, delay time.Duration) []int {
+	var years []int
+	for y := c.YearMin; y <= ceiling; y++ {
+		subdirs := []string{fmt.Sprintf("%d", y)}
+		if len(c.Modes) > 0 {
+			subdirs = nil
+			for _, m := range c.Modes {
+				subdirs = append(subdirs, fmt.Sprintf("%d%s", y, m))
+			}
+		}
+		for _, sd := range subdirs {
+			if _, err := httpGet(ctx, client, c.BaseURL+sd+"/"); err == nil {
+				years = append(years, y)
+				break
+			}
+			sleepWithContext(ctx, delay)
+		}
+	}
+	return years
+}
+
 func fetchCQIndex(ctx context.Context, client *http.Client, url string) ([]logEntry, error) {
 	body, err := httpGet(ctx, client, url)
 	if err != nil {

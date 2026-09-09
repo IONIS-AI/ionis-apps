@@ -59,6 +59,7 @@ type Stats struct {
 	TotalRows   atomic.Uint64
 	TotalFiles  atomic.Uint64
 	SkippedRows atomic.Uint64
+	Quarantined atomic.Uint64
 	FailedFiles atomic.Uint64
 	GridsFound  atomic.Uint64
 	StartTime   time.Time
@@ -483,6 +484,127 @@ func flushGrids(ctx context.Context, conn *ch.Client, entries []GridEntry) error
 }
 
 // processFile parses a single Cabrillo log and inserts QSOs using a shared connection.
+// ---------------------------------------------------------------------------
+// Date validation
+//
+// A QSO must be dated inside the year its source directory declares. That is the
+// whole rule, and it is deliberately all of it.
+//
+// It exists because upstream sites republish neighbouring years under the wrong
+// path. cqwpxrtty.com/publiclogs/2018/ serves 3,146 logs that are 2017
+// submissions -- fetch 2017/aa7v.log and 2018/aa7v.log and the QSOs are identical
+// 2017-02-11/12 content. contest-download mirrors the site faithfully, so those
+// rows arrive twice under two source keys, and contest.bronze is a plain
+// MergeTree that collapses nothing. One event contributed 533,506 duplicates.
+// The same rule catches corrupted year fields in operator logs (2008-11-29
+// recorded as 2088-11-29) and dates that failed to parse into the Unix epoch.
+//
+// What the rule does NOT do is assert when any contest was held. Contest dates,
+// log publication dates, and the date a file lands on a website are three
+// different things. A hardcoded calendar of 15 series across 20 years would be
+// one wrong entry away from silently rejecting a legitimate year, and would need
+// maintaining every January forever -- the same trap as the downloader\'s
+// hand-kept map of ARRL instance IDs.
+//
+// The two days of slack at each boundary are load-bearing, not padding: ARRL RTTY
+// Roundup runs the first weekend of January, and arrl-rtty/2021 legitimately
+// holds 190,174 QSOs dated 2021-01-02.
+// ---------------------------------------------------------------------------
+
+var (
+	quarantineTable   = "contest.quarantine"
+	quarantineEnabled = true
+	declaredYearRe    = regexp.MustCompile(`(\d{4})`)
+)
+
+// sourceDeclaredYear reports the year a source key claims: "cq-ww/2005cw" -> 2005.
+// Returns false when the key carries no plausible year, in which case the QSO is
+// admitted -- an unrecognised layout must not silently quarantine a whole feed.
+func sourceDeclaredYear(src string) (int, bool) {
+	m := declaredYearRe.FindStringSubmatch(src)
+	if m == nil {
+		return 0, false
+	}
+	y, err := strconv.Atoi(m[1])
+	if err != nil || y < 1990 || y > 2100 {
+		return 0, false
+	}
+	return y, true
+}
+
+// inDeclaredYear reports whether ts falls within year y, allowing two days either
+// side so a contest straddling New Year is not rejected.
+func inDeclaredYear(ts time.Time, y int) bool {
+	lo := time.Date(y, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, -2)
+	hi := time.Date(y+1, 1, 1, 0, 0, 0, 0, time.UTC).AddDate(0, 0, 2)
+	return !ts.Before(lo) && ts.Before(hi)
+}
+
+// flushQuarantine writes held-back QSOs to the quarantine table. Failure here is
+// logged but never fatal: quarantine is a safety net, and a net that takes the
+// whole ingest down when it tears is worse than no net.
+func flushQuarantine(ctx context.Context, conn *ch.Client, rows []*QSO, filePath string, year int, reason string) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	var (
+		colTS   proto.ColDateTime
+		colFreq proto.ColUInt32
+		colBand proto.ColInt32
+		colMode = new(proto.ColStr).LowCardinality()
+		colC1   proto.ColStr
+		colC2   proto.ColStr
+		colRSTS proto.ColStr
+		colExS  proto.ColStr
+		colRSTR proto.ColStr
+		colExR  proto.ColStr
+		colCon  = new(proto.ColStr).LowCardinality()
+		colSrc  = new(proto.ColStr).LowCardinality()
+		colPath proto.ColStr
+		colYear proto.ColUInt16
+		colWhy  = new(proto.ColStr).LowCardinality()
+	)
+	for _, q := range rows {
+		colTS.Append(q.Timestamp)
+		colFreq.Append(q.Frequency)
+		colBand.Append(q.Band)
+		colMode.Append(q.Mode)
+		colC1.Append(q.Call1)
+		colC2.Append(q.Call2)
+		colRSTS.Append(q.RSTSent)
+		colExS.Append(q.ExchSent)
+		colRSTR.Append(q.RSTRcvd)
+		colExR.Append(q.ExchRcvd)
+		colCon.Append(q.Contest)
+		colSrc.Append(q.Source)
+		colPath.Append(filePath)
+		colYear.Append(uint16(year))
+		colWhy.Append(reason)
+	}
+	return conn.Do(ctx, ch.Query{
+		Body: fmt.Sprintf("INSERT INTO %s (timestamp, frequency, band, mode, call_1, call_2, "+
+			"rst_sent, exch_sent, rst_rcvd, exch_rcvd, contest, source, file_path, "+
+			"declared_year, reason) VALUES", quarantineTable),
+		Input: proto.Input{
+			{Name: "timestamp", Data: colTS},
+			{Name: "frequency", Data: colFreq},
+			{Name: "band", Data: colBand},
+			{Name: "mode", Data: colMode},
+			{Name: "call_1", Data: colC1},
+			{Name: "call_2", Data: colC2},
+			{Name: "rst_sent", Data: colRSTS},
+			{Name: "exch_sent", Data: colExS},
+			{Name: "rst_rcvd", Data: colRSTR},
+			{Name: "exch_rcvd", Data: colExR},
+			{Name: "contest", Data: colCon},
+			{Name: "source", Data: colSrc},
+			{Name: "file_path", Data: colPath},
+			{Name: "declared_year", Data: colYear},
+			{Name: "reason", Data: colWhy},
+		},
+	})
+}
+
 func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table string, batchSize int, enrich bool, stats *Stats, rejectWriter *RejectWriter) uint64 {
 	fileName := filepath.Base(path)
 	src := sourceKey(path, srcDir)
@@ -515,9 +637,20 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	var rowCount uint64
 	startTime := time.Now()
 
+	declaredYear, haveYear := sourceDeclaredYear(src)
+	var held []*QSO
+
 	for _, qso := range qsos {
 		if ctx.Err() != nil {
 			return 0
+		}
+
+		// Hold back anything dated outside the year this directory claims.
+		if quarantineEnabled && haveYear && !inDeclaredYear(qso.Timestamp, declaredYear) {
+			qso.Contest = contestID
+			qso.Source = src
+			held = append(held, qso)
+			continue
 		}
 
 		batch.Timestamp.Append(qso.Timestamp)
@@ -549,6 +682,14 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 			log.Printf("[%s] final flush error: %v", relPath, err)
 		}
 		batch.Reset()
+	}
+
+	if len(held) > 0 {
+		stats.Quarantined.Add(uint64(len(held)))
+		if err := flushQuarantine(ctx, conn, held, relPath, declaredYear, "off-declared-year"); err != nil {
+			log.Printf("[%s] quarantine insert error: %v", relPath, err)
+		}
+		rejectWriter.Write(relPath, fmt.Sprintf("%d QSO(s) dated outside declared year %d", len(held), declaredYear))
 	}
 
 	elapsed := time.Since(startTime)
@@ -670,6 +811,8 @@ func main() {
 	fullMode := flag.Bool("full", false, "Full reload: re-ingest all files, update watermark")
 	prime := flag.Bool("prime", false, "Bootstrap watermark for existing log files without loading data")
 	dryRun := flag.Bool("dry-run", false, "List files that would be processed, then exit")
+	qTable := flag.String("quarantine-table", "contest.quarantine", "Table receiving QSOs dated outside their directory's year")
+	noQuarantine := flag.Bool("no-quarantine", false, "Admit every QSO regardless of date (disables the date guard)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "contest-ingest v%s — Parse Cabrillo contest logs into ClickHouse\n\n", Version)
@@ -786,6 +929,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("Load watermark failed: %v", err)
 	}
+	quarantineTable = *qTable
+	quarantineEnabled = !*noQuarantine
+	if quarantineEnabled {
+		log.Printf("Date guard: ON  (off-year QSOs -> %s)", quarantineTable)
+	} else {
+		log.Printf("Date guard: OFF (--no-quarantine)")
+	}
+
 	log.Printf("Watermark: %d file(s) already loaded", len(wm))
 
 	// Filter files based on mode
@@ -866,6 +1017,9 @@ func main() {
 	log.Printf("Files Failed:   %d", failedFiles)
 	log.Printf("QSOs Inserted:  %d", totalRows)
 	log.Printf("QSOs Skipped:   %d", skippedRows)
+	if q := stats.Quarantined.Load(); q > 0 {
+		log.Printf("QSOs Held:      %d (dated outside declared year -> %s)", q, quarantineTable)
+	}
 	log.Printf("Grids Enriched: %d", gridsFound)
 	log.Printf("Elapsed:        %v", elapsed.Round(time.Second))
 	if rps > 1_000_000 {
