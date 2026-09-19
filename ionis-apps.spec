@@ -268,8 +268,12 @@ systemd-sysusers %{_sysusersdir}/ionis-apps.conf >/dev/null 2>&1 || :
 - All 12 units now run as ionis-ingest:ionis-data, not as the interactive ki7mt
   account. A service account cannot log in; a human account can, and a rebuilt
   host has no ki7mt until someone creates it
-- Create ionis-data(970)/ionis-ingest(971) via systemd-sysusers at install, so a
-  rebuilt host gets the accounts from the package
+- Create ionis-data/ionis-ingest via systemd-sysusers at install, with ids
+  allocated automatically as sysusers.d(5) recommends — a public package should
+  not claim fixed ids on someone else's system. This lab pins 970/971 in
+  fleet-ops, which runs first; sysusers leaves existing accounts alone
+- Fixes units being unusable outside this lab: before 4.0.8 they named `ki7mt`,
+  an account no other host has, so every timer failed to start there
 - REQUIRES fleet-ops ionis-service-accounts.yml to have run first on an existing
   host: it puts the data directories in the ionis-data group, without which the
   upgraded units start cleanly and cannot write
