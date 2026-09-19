@@ -136,6 +136,14 @@ install -p -m 0644 systemd/ionis-apps.sysusers %{buildroot}%{_sysusersdir}/ionis
 install -d -m 0755 %{buildroot}%{_tmpfilesdir}
 install -p -m 0644 systemd/ionis-apps.tmpfiles %{buildroot}%{_tmpfilesdir}/ionis-apps.conf
 
+# The list the post scriptlet checks for shadowing, DERIVED from the same systemd/ directory the
+# install section reads below. The first was hand-maintained and had drifted before shipping — 14
+# units named, 23 installed, and the two it covered were the two visible on one host. A list
+# that must agree with another list, and fails quietly when it does not, is the exact shape
+# #183 exists to abolish; it does not belong inside the mechanism enforcing it.
+install -d -m 0755 %{buildroot}%{_datadir}/%{name}
+ls systemd/*.service systemd/*.timer | xargs -n1 basename > %{buildroot}%{_datadir}/%{name}/units.list
+
 install -d -m 0755 %{buildroot}%{_unitdir}
 install -p -m 0644 systemd/wspr-download.service       %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-download.timer         %{buildroot}%{_unitdir}/
@@ -164,6 +172,7 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 %files
 %{_sysusersdir}/ionis-apps.conf
 %{_tmpfilesdir}/ionis-apps.conf
+%{_datadir}/%{name}/units.list
 %license COPYING
 %doc README.md
 %dir %{_datadir}/%{name}
@@ -178,20 +187,26 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 systemd-sysusers %{_sysusersdir}/ionis-apps.conf >/dev/null 2>&1 || :
 systemd-tmpfiles --create %{_tmpfilesdir}/ionis-apps.conf >/dev/null 2>&1 || :
 
-# WARN, NEVER DELETE, when a unit we just installed is shadowed by a hand-placed file in
+# WARN, NEVER DELETE, when a unit this package installs is shadowed by a hand-placed file in
 # /etc/systemd/system. That file wins, silently: dnf succeeds, `systemctl status` is green, and
 # the host keeps running the OLD unit — which on this lab's control node still says User=ki7mt.
+#
 # Removing files in /etc that this package does not own is the helpfulness that eventually
 # deletes something someone meant to keep, so this only says so (Watson, KI7MT/fleet-ops#183).
-for u in wspr-download.service wspr-download.timer solar-backfill.service solar-backfill.timer \
-         wspr-live-download.service wspr-live-ingest.service wspr-turbo.service \
-         solar-live-update.service solar-history-load.service dscovr-ingest.service \
-         rbn-download.service rbn-ingest.service pskr-ingest.service pskr-collector.service; do
-    if [ -e "/etc/systemd/system/$u" ]; then
-        echo "ionis-apps: WARNING /etc/systemd/system/$u shadows the packaged unit; systemd will use the /etc copy." >&2
-        echo "ionis-apps:          remove it and run 'systemctl daemon-reload' to use the packaged version." >&2
-    fi
-done
+#
+# The list is generated at build time from systemd/, so adding a unit cannot leave a gap here.
+# (Section names are avoided in these comments: rpm expands them and reads them as sections.)
+# The second test matters: a subpackage may not be installed, and warning about a file that
+# shadows nothing would train people to ignore this.
+if [ -r %{_datadir}/%{name}/units.list ]; then
+    while read -r u; do
+        [ -n "$u" ] || continue
+        if [ -e "%{_unitdir}/$u" ] && [ -e "/etc/systemd/system/$u" ]; then
+            echo "ionis-apps: WARNING /etc/systemd/system/$u shadows the packaged unit; systemd uses the /etc copy." >&2
+            echo "ionis-apps:          remove it and run 'systemctl daemon-reload' to use the packaged version." >&2
+        fi
+    done < %{_datadir}/%{name}/units.list
+fi
 
 %files wspr
 %{_bindir}/wspr-shredder
@@ -291,7 +306,9 @@ done
 - %%post warns when a hand-placed /etc/systemd/system file shadows a unit this
   package installs. It never deletes: /etc is not ours. dnf succeeds and the
   timers stay green while the host runs the OLD unit, so silence is the
-  dangerous default here
+  dangerous default here. The list is DERIVED at build time from systemd/:
+  the first version was hand-written and had already drifted before shipping,
+  covering 14 of 23 units — nine timers uncovered (Watson)
 - Note in sysusers that ionis-report is absent on purpose (it belongs to
   morning-health-check, which lives in fleet-ops)
 
