@@ -1,0 +1,16 @@
+# Rolling 30-day GFZ Potsdam backfill (SSN/Kp/Ap) — repairs gaps the live updater leaves
+# behind when a source is late or briefly unavailable.
+#
+# Packaged in 4.0.8; see wspr-download.service.
+[Unit]
+Description=Solar GFZ Potsdam backfill (SSN/Kp/Ap)
+After=network-online.target clickhouse-server.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c '/usr/bin/solar-backfill -start $(date -u -d "30 days ago" +%%Y-%%m-%%d)'
+User=ionis-ingest
+Group=ionis-data
+StandardOutput=journal
+StandardError=journal

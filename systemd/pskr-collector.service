@@ -22,8 +22,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ki7mt
-Group=ki7mt
+User=ionis-ingest
+Group=ionis-data
 
 ExecStart=/usr/bin/pskr-collector \
     --broker mqtt.pskreporter.info:1883 \

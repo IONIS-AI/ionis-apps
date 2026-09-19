@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.0.7
+Version:        4.0.8
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -21,6 +21,7 @@ Provides:       ki7mt-ai-lab-apps
 
 # Build requirements
 BuildRequires:  golang >= 1.22
+BuildRequires:  systemd-rpm-macros
 BuildRequires:  git
 BuildRequires:  make
 
@@ -129,7 +130,15 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 # have orphaned it. Packaging them here starts closing that: the units travel with the
 # binary they invoke, and a version bump can no longer leave a unit pointing at a flag
 # the new binary does not accept.
+# Accounts the units run as (systemd-sysusers), created at install by %post below.
+install -d -m 0755 %{buildroot}%{_sysusersdir}
+install -p -m 0644 systemd/ionis-apps.sysusers %{buildroot}%{_sysusersdir}/ionis-apps.conf
+
 install -d -m 0755 %{buildroot}%{_unitdir}
+install -p -m 0644 systemd/wspr-download.service       %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/wspr-download.timer         %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-backfill.service      %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-backfill.timer        %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-live-download.service %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-live-download.timer   %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-live-ingest.service   %{buildroot}%{_unitdir}/
@@ -151,11 +160,19 @@ install -p -m 0644 systemd/pskr-ingest.service            %{buildroot}%{_unitdir
 install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir}/
 
 %files
+%{_sysusersdir}/ionis-apps.conf
 %license COPYING
 %doc README.md
 %dir %{_datadir}/%{name}
 %dir %{_sysconfdir}/%{name}
 %{_bindir}/db-validate
+
+# The accounts the units run as. Creating them here rather than in a playbook is what makes
+# a rebuilt host complete from packages alone — the property #183 is about. Idempotent:
+# systemd-sysusers leaves an existing account alone, so this never fights the playbook that
+# created them first (KI7MT/fleet-ops#183).
+%post
+systemd-sysusers %{_sysusersdir}/ionis-apps.conf >/dev/null 2>&1 || :
 
 %files wspr
 %{_bindir}/wspr-shredder
@@ -165,6 +182,8 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 %{_bindir}/wspr-backfill
 %{_bindir}/wspr-live-download
 %{_bindir}/wspr-live-ingest
+%{_unitdir}/wspr-download.service
+%{_unitdir}/wspr-download.timer
 %{_unitdir}/wspr-live-download.service
 %{_unitdir}/wspr-live-download.timer
 %{_unitdir}/wspr-live-ingest.service
@@ -173,13 +192,13 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 %{_unitdir}/wspr-turbo.timer
 
 %post wspr
-%systemd_post wspr-live-download.timer wspr-live-ingest.timer wspr-turbo.timer
+%systemd_post wspr-download.timer wspr-live-download.timer wspr-live-ingest.timer wspr-turbo.timer
 
 %preun wspr
-%systemd_preun wspr-live-download.timer wspr-live-ingest.timer wspr-turbo.timer
+%systemd_preun wspr-download.timer wspr-live-download.timer wspr-live-ingest.timer wspr-turbo.timer
 
 %postun wspr
-%systemd_postun_with_restart wspr-live-download.timer wspr-live-ingest.timer wspr-turbo.timer
+%systemd_postun_with_restart wspr-download.timer wspr-live-download.timer wspr-live-ingest.timer wspr-turbo.timer
 
 %files solar
 %{_bindir}/solar-ingest
@@ -189,6 +208,8 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 %{_bindir}/solar-refresh
 %{_bindir}/solar-live-update
 %{_bindir}/solar-history-load
+%{_unitdir}/solar-backfill.service
+%{_unitdir}/solar-backfill.timer
 %{_unitdir}/dscovr-ingest.service
 %{_unitdir}/dscovr-ingest.timer
 %{_unitdir}/solar-live-update.service
@@ -197,13 +218,13 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 %{_unitdir}/solar-history-load.timer
 
 %post solar
-%systemd_post dscovr-ingest.timer solar-live-update.timer solar-history-load.timer
+%systemd_post dscovr-ingest.timer solar-backfill.timer solar-live-update.timer solar-history-load.timer
 
 %preun solar
-%systemd_preun dscovr-ingest.timer solar-live-update.timer solar-history-load.timer
+%systemd_preun dscovr-ingest.timer solar-backfill.timer solar-live-update.timer solar-history-load.timer
 
 %postun solar
-%systemd_postun_with_restart dscovr-ingest.timer solar-live-update.timer solar-history-load.timer
+%systemd_postun_with_restart dscovr-ingest.timer solar-backfill.timer solar-live-update.timer solar-history-load.timer
 
 %files contest
 %{_bindir}/contest-download
@@ -241,6 +262,18 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Sat Sep 19 2026 Bob <bob@ipa.home.arpa> - 4.0.8-1
+- Package wspr-download and solar-backfill units, the two missed when the other
+  nine moved into this package in 4.0.5 (KI7MT/fleet-ops#183)
+- All 12 units now run as ionis-ingest:ionis-data, not as the interactive ki7mt
+  account. A service account cannot log in; a human account can, and a rebuilt
+  host has no ki7mt until someone creates it
+- Create ionis-data(970)/ionis-ingest(971) via systemd-sysusers at install, so a
+  rebuilt host gets the accounts from the package
+- REQUIRES fleet-ops ionis-service-accounts.yml to have run first on an existing
+  host: it puts the data directories in the ionis-data group, without which the
+  upgraded units start cleanly and cannot write
+
 * Wed Sep 09 2026 Greg Beam <ki7mt@yahoo.com> - 4.0.7-1
 - solar-live-update: wspr.live_conditions was ENGINE = Memory, dropped and recreated on
   every run. Memory is lost on every ClickHouse restart, and it does not come back stale --

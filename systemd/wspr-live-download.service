@@ -13,8 +13,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=ki7mt
-Group=ki7mt
+User=ionis-ingest
+Group=ionis-data
 # -delay 60s, not the tool's default 5s. What matters is DUTY CYCLE, not the gap: each
 # day is ~156 MB and occupies wspr.live for ~19s, so a 5s gap means we are pulling 79% of
 # the time. At 60s it is 24%. The nightly job only fetches the settle window (~3 days), so

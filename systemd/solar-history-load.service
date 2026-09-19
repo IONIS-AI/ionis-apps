@@ -6,4 +6,5 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/solar-history-load --download
-User=ki7mt
+User=ionis-ingest
+Group=ionis-data

@@ -1,0 +1,7 @@
+# Accounts the IONIS units run as. systemd-sysusers creates them at install, so a rebuilt
+# host gets them from the package rather than from a playbook someone has to remember.
+#
+# Fixed ids: this data is backed up and replicated, and a dynamically allocated uid differs
+# on a rebuilt or second host — which turns a restore into a chown hunt.
+g ionis-data   970
+u ionis-ingest 971:970 "IONIS ingest pipelines" /var/lib/ionis-ingest /sbin/nologin
