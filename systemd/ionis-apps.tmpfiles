@@ -1,0 +1,4 @@
+# sysusers.d gives ionis-ingest a home but does not create it — harmless while the account is
+# nologin, until something writes to $HOME (a Go tool's cache, a Python venv) and fails in a way
+# that points nowhere near the missing directory.
+d /var/lib/ionis-ingest 0750 ionis-ingest ionis-data -

@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.0.8
+Version:        4.0.9
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -133,6 +133,8 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 # Accounts the units run as (systemd-sysusers), created at install by %post below.
 install -d -m 0755 %{buildroot}%{_sysusersdir}
 install -p -m 0644 systemd/ionis-apps.sysusers %{buildroot}%{_sysusersdir}/ionis-apps.conf
+install -d -m 0755 %{buildroot}%{_tmpfilesdir}
+install -p -m 0644 systemd/ionis-apps.tmpfiles %{buildroot}%{_tmpfilesdir}/ionis-apps.conf
 
 install -d -m 0755 %{buildroot}%{_unitdir}
 install -p -m 0644 systemd/wspr-download.service       %{buildroot}%{_unitdir}/
@@ -161,6 +163,7 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 
 %files
 %{_sysusersdir}/ionis-apps.conf
+%{_tmpfilesdir}/ionis-apps.conf
 %license COPYING
 %doc README.md
 %dir %{_datadir}/%{name}
@@ -173,6 +176,22 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 # created them first (KI7MT/fleet-ops#183).
 %post
 systemd-sysusers %{_sysusersdir}/ionis-apps.conf >/dev/null 2>&1 || :
+systemd-tmpfiles --create %{_tmpfilesdir}/ionis-apps.conf >/dev/null 2>&1 || :
+
+# WARN, NEVER DELETE, when a unit we just installed is shadowed by a hand-placed file in
+# /etc/systemd/system. That file wins, silently: dnf succeeds, `systemctl status` is green, and
+# the host keeps running the OLD unit — which on this lab's control node still says User=ki7mt.
+# Removing files in /etc that this package does not own is the helpfulness that eventually
+# deletes something someone meant to keep, so this only says so (Watson, KI7MT/fleet-ops#183).
+for u in wspr-download.service wspr-download.timer solar-backfill.service solar-backfill.timer \
+         wspr-live-download.service wspr-live-ingest.service wspr-turbo.service \
+         solar-live-update.service solar-history-load.service dscovr-ingest.service \
+         rbn-download.service rbn-ingest.service pskr-ingest.service pskr-collector.service; do
+    if [ -e "/etc/systemd/system/$u" ]; then
+        echo "ionis-apps: WARNING /etc/systemd/system/$u shadows the packaged unit; systemd will use the /etc copy." >&2
+        echo "ionis-apps:          remove it and run 'systemctl daemon-reload' to use the packaged version." >&2
+    fi
+done
 
 %files wspr
 %{_bindir}/wspr-shredder
@@ -262,6 +281,20 @@ systemd-sysusers %{_sysusersdir}/ionis-apps.conf >/dev/null 2>&1 || :
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Sat Sep 19 2026 Bob <bob@ipa.home.arpa> - 4.0.9-1
+- sysusers comment no longer carries the uid justification retracted in
+  KI7MT/fleet-ops#191: the correction had landed in the playbook but not in
+  the file that ships. Records the rule that survives instead — pin only when
+  something outside your control already fixed the number (Watson)
+- Create /var/lib/ionis-ingest via tmpfiles; sysusers names a home but does
+  not make one, which only bites when something writes to $HOME
+- %%post warns when a hand-placed /etc/systemd/system file shadows a unit this
+  package installs. It never deletes: /etc is not ours. dnf succeeds and the
+  timers stay green while the host runs the OLD unit, so silence is the
+  dangerous default here
+- Note in sysusers that ionis-report is absent on purpose (it belongs to
+  morning-health-check, which lives in fleet-ops)
+
 * Sat Sep 19 2026 Bob <bob@ipa.home.arpa> - 4.0.8-1
 - Package wspr-download and solar-backfill units, the two missed when the other
   nine moved into this package in 4.0.5 (KI7MT/fleet-ops#183)

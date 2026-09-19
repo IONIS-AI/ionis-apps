@@ -1,15 +1,20 @@
-# Accounts the IONIS units run as. systemd-sysusers creates them at install, so the timers
-# have an account to run as on ANY host — including a stranger's, installing from Copr.
-# Before 4.0.8 the units named `ki7mt`, a human account that exists only on this lab's
-# control node, so they could not start anywhere else.
+# Accounts the IONIS units run as. systemd-sysusers creates them at install, so the timers have
+# an account to run as on ANY host — including a stranger's, installing from Copr. Before 4.0.8
+# the units named `ki7mt`, a human account that exists only on one lab's control node, so they
+# could not start anywhere else.
 #
-# IDS ARE ALLOCATED AUTOMATICALLY ("-"), as sysusers.d(5) recommends unless a specific id is
-# strictly necessary. It is not necessary for correctness here, and a public package has no
-# business claiming 970/971 on someone else's system.
+# IDS ARE ALLOCATED AUTOMATICALLY ("-"), as sysusers.d(5) counsels: "strongly recommended unless
+# it is strictly necessary to use a specific UID or GID". It is not necessary here, and nothing
+# downstream should infer that pinning is what a careful deployment does.
 #
-# This lab DOES pin them (ionis-data 970, ionis-ingest 971) because its data is backed up and
-# replicated between hosts, where a differing uid turns a restore into a chown hunt — but it
-# pins them in fleet-ops/ionis-service-accounts.yml, which runs first. sysusers leaves an
-# existing account alone, so the lab keeps its fixed ids and everyone else gets a free one.
+# The rule worth carrying: PIN ONLY WHEN SOMETHING OUTSIDE YOUR CONTROL ALREADY FIXED THE NUMBER
+# — a container image, a vendor appliance, an upstream that hardcodes it. Nothing here is in that
+# class. (An earlier revision of this comment claimed the lab pins these because its data is
+# backed up and replicated. That justification did not survive checking — zfs send streams
+# restore onto a host whose accounts already exist, nothing NFS-exports those directories — and
+# the lab does not pin them either. Recorded rather than deleted, because the claim shipped.)
+#
+# ionis-report is deliberately NOT here: it belongs to morning-health-check, which lives in
+# fleet-ops, not in this package. The two account lists differ on purpose.
 g ionis-data   -
 u ionis-ingest -:ionis-data "IONIS ingest pipelines" /var/lib/ionis-ingest /sbin/nologin
