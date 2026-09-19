@@ -11,8 +11,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=ki7mt
-Group=ki7mt
+User=ionis-ingest
+Group=ionis-data
 ExecStart=/usr/bin/wspr-live-ingest -src /mnt/wspr-data/live -host 10.60.1.1:9000
 StandardOutput=journal
 StandardError=journal
