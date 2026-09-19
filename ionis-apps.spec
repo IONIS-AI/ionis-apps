@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.0.8
+Version:        4.0.9
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -133,6 +133,16 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 # Accounts the units run as (systemd-sysusers), created at install by %post below.
 install -d -m 0755 %{buildroot}%{_sysusersdir}
 install -p -m 0644 systemd/ionis-apps.sysusers %{buildroot}%{_sysusersdir}/ionis-apps.conf
+install -d -m 0755 %{buildroot}%{_tmpfilesdir}
+install -p -m 0644 systemd/ionis-apps.tmpfiles %{buildroot}%{_tmpfilesdir}/ionis-apps.conf
+
+# The list the post scriptlet checks for shadowing, DERIVED from the same systemd/ directory the
+# install section reads below. The first was hand-maintained and had drifted before shipping — 14
+# units named, 23 installed, and the two it covered were the two visible on one host. A list
+# that must agree with another list, and fails quietly when it does not, is the exact shape
+# #183 exists to abolish; it does not belong inside the mechanism enforcing it.
+install -d -m 0755 %{buildroot}%{_datadir}/%{name}
+ls systemd/*.service systemd/*.timer | xargs -n1 basename > %{buildroot}%{_datadir}/%{name}/units.list
 
 install -d -m 0755 %{buildroot}%{_unitdir}
 install -p -m 0644 systemd/wspr-download.service       %{buildroot}%{_unitdir}/
@@ -161,6 +171,8 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 
 %files
 %{_sysusersdir}/ionis-apps.conf
+%{_tmpfilesdir}/ionis-apps.conf
+%{_datadir}/%{name}/units.list
 %license COPYING
 %doc README.md
 %dir %{_datadir}/%{name}
@@ -173,6 +185,28 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 # created them first (KI7MT/fleet-ops#183).
 %post
 systemd-sysusers %{_sysusersdir}/ionis-apps.conf >/dev/null 2>&1 || :
+systemd-tmpfiles --create %{_tmpfilesdir}/ionis-apps.conf >/dev/null 2>&1 || :
+
+# WARN, NEVER DELETE, when a unit this package installs is shadowed by a hand-placed file in
+# /etc/systemd/system. That file wins, silently: dnf succeeds, `systemctl status` is green, and
+# the host keeps running the OLD unit — which on this lab's control node still says User=ki7mt.
+#
+# Removing files in /etc that this package does not own is the helpfulness that eventually
+# deletes something someone meant to keep, so this only says so (Watson, KI7MT/fleet-ops#183).
+#
+# The list is generated at build time from systemd/, so adding a unit cannot leave a gap here.
+# (Section names are avoided in these comments: rpm expands them and reads them as sections.)
+# The second test matters: a subpackage may not be installed, and warning about a file that
+# shadows nothing would train people to ignore this.
+if [ -r %{_datadir}/%{name}/units.list ]; then
+    while read -r u; do
+        [ -n "$u" ] || continue
+        if [ -e "%{_unitdir}/$u" ] && [ -e "/etc/systemd/system/$u" ]; then
+            echo "ionis-apps: WARNING /etc/systemd/system/$u shadows the packaged unit; systemd uses the /etc copy." >&2
+            echo "ionis-apps:          remove it and run 'systemctl daemon-reload' to use the packaged version." >&2
+        fi
+    done < %{_datadir}/%{name}/units.list
+fi
 
 %files wspr
 %{_bindir}/wspr-shredder
@@ -262,6 +296,22 @@ systemd-sysusers %{_sysusersdir}/ionis-apps.conf >/dev/null 2>&1 || :
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Sat Sep 19 2026 Bob <bob@ipa.home.arpa> - 4.0.9-1
+- sysusers comment no longer carries the uid justification retracted in
+  KI7MT/fleet-ops#191: the correction had landed in the playbook but not in
+  the file that ships. Records the rule that survives instead — pin only when
+  something outside your control already fixed the number (Watson)
+- Create /var/lib/ionis-ingest via tmpfiles; sysusers names a home but does
+  not make one, which only bites when something writes to $HOME
+- %%post warns when a hand-placed /etc/systemd/system file shadows a unit this
+  package installs. It never deletes: /etc is not ours. dnf succeeds and the
+  timers stay green while the host runs the OLD unit, so silence is the
+  dangerous default here. The list is DERIVED at build time from systemd/:
+  the first version was hand-written and had already drifted before shipping,
+  covering 14 of 23 units — nine timers uncovered (Watson)
+- Note in sysusers that ionis-report is absent on purpose (it belongs to
+  morning-health-check, which lives in fleet-ops)
+
 * Sat Sep 19 2026 Bob <bob@ipa.home.arpa> - 4.0.8-1
 - Package wspr-download and solar-backfill units, the two missed when the other
   nine moved into this package in 4.0.5 (KI7MT/fleet-ops#183)
