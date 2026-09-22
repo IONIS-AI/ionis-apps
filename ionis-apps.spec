@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.0.9
+Version:        4.1.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -304,6 +304,32 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Mon Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.1.0-1
+- MINOR, not patch: the tools no longer carry site paths, so an upgrade changes
+  how every one of them is configured. A host without /etc/ionis/paths.conf has
+  tools that refuse to run rather than tools that write somewhere arbitrary --
+  the intended behaviour, but not a patch-level change.
+- No compiled-in site paths in any binary. Resolution is flag, then
+  /etc/ionis/paths.conf, then a failure naming both. These ship on COPR, and a
+  default like /mnt/ai-stack/solar-data/raw is a statement about one machine
+  asserted to every machine that installs the package -- and it fails silently,
+  because the tool creates the directory it was told to write to and then works
+  perfectly. 19 flags across 15 binaries (IONIS-AI/ionis-apps#17, #18)
+- NEW: /etc/ionis/paths.conf, %config(noreplace). Site configuration, carrying
+  this lab's values as a worked example
+- Shipped units read it through EnvironmentFile. Six of them hardcoded this
+  lab's ClickHouse address and disagreed about which -- 192.168.1.90 in four,
+  10.60.1.1 in wspr-live-ingest. One value, one place
+- contest-ingest's --src defaulted to /mnt/contest-logs, the STALE tree rather
+  than _v2: a corpus missing every season since 2016, in a shipped default
+- Solar raw data moves off /mnt/ai-stack (AI stack ops only, Judge) to
+  /mnt/solar-data; wspr run reports to /var/log/ionis. Migration is
+  fleet-ops ionis-storage-separation.yml, which refuses to run until this
+  package is installed
+- Regression test internal/common/nositepaths_test.go scans cmd/ by VALUE, not
+  by flag name -- the first sweep enumerated by name and missed five tools using
+  -src and -outdir
+
 * Sat Sep 19 2026 Bob <bob@ipa.home.arpa> - 4.0.9-1
 - sysusers comment no longer carries the uid justification retracted in
   KI7MT/fleet-ops#191: the correction had landed in the playbook but not in
