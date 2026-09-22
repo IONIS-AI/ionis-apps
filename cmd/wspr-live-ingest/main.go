@@ -35,6 +35,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 	"io/fs"
 	"log"
 	"os"
@@ -277,7 +278,7 @@ func discoverFiles(root string) ([]string, error) {
 
 func main() {
 	var (
-		src    = flag.String("src", "/mnt/wspr-data/live", "Source root (YYYY/MM/DD.jsonl.gz)")
+		src    = flag.String("src", "", "Source root, YYYY/MM/DD.jsonl.gz (default: $IONIS_WSPR_LIVE_DIR)")
 		host   = flag.String("host", "10.60.1.1:9000", "ClickHouse host:port")
 		db     = flag.String("db", "wspr", "ClickHouse database")
 		table  = flag.String("table", "bronze", "ClickHouse table")
@@ -294,6 +295,12 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if v, err := common.ResolvePath(*src, "IONIS_WSPR_LIVE_DIR", "src", "WSPR live capture directory"); err != nil {
+		log.Fatal(err)
+	} else {
+		*src = v
+	}
 
 	log.Printf("wspr-live-ingest v%s", Version)
 	fq := *db + "." + *table
