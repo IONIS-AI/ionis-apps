@@ -221,16 +221,18 @@ var batchPool = sync.Pool{
 // isCallsign checks if a string looks like an amateur radio callsign.
 // Must contain both a letter and a digit, be 3+ chars, and match the callsign pattern.
 // Also accepts callsigns with /suffix (e.g., HB9DAX/QRP, W1AW/4).
-// baseCall returns the actual callsign inside a portable designator, or "" if the
+// baseCall returns the actual callsign inside a compound callsign, or "" if the
 // string holds none.
 //
 // WHICH SIDE OF THE SLASH IS THE CALLSIGN DEPENDS ON THE FORM, so this cannot just
 // take one side -- which is what it used to do, keeping everything before the first
 // slash:
 //
-//	LX/ON9TT      prefix form      the call is AFTER  (ON9TT operating in Luxembourg)
-//	KI7MT/KP4     suffix form      the call is BEFORE (KI7MT operating in KP4)
-//	DL2AW/P       qualifier        the call is BEFORE (portable)
+//	LX/ON9TT      location prefix  the call is AFTER  (ON9TT operating in Luxembourg)
+//	KI7MT/KP4     location suffix  the call is BEFORE (KI7MT operating in KP4)
+//	K1ABC/4       call-area suffix the call is BEFORE
+//	DL2AW/P       operating suffix the call is BEFORE (/P portable, /M mobile,
+//	                               /MM maritime, /AM aeronautical, /QRP low power)
 //	PA/DL2AW/P    both             the call is in the MIDDLE
 //
 // Taking the leading component turned LX/ON9TT into "LX", which matches no callsign
@@ -240,8 +242,8 @@ var batchPool = sync.Pool{
 //
 // The rule that works on every form: split on "/" and keep the components that are
 // callsign-shaped. A DXCC prefix is not (KP4, WP4, EA5 end in a digit; LX, 9A, PA
-// have no digit-then-letter), and neither is a qualifier (P, M, MM, QRP), so in
-// practice exactly one component survives. When two do -- VP2E/K1ABC, where the
+// have no digit-then-letter), and neither is an operating suffix (P, M, MM, AM,
+// QRP), so in practice exactly one component survives. When two do -- VP2E/K1ABC, where the
 // prefix is itself a valid call -- the longer one is the operator and the shorter
 // the location, so length breaks the tie.
 func baseCall(s string) string {

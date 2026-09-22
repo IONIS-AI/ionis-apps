@@ -71,7 +71,7 @@ func TestParseFileConcatenatedLogs(t *testing.T) {
 
 // A single log must be unchanged by the fix.
 func TestParseFileSingleLogUnchanged(t *testing.T) {
-	_, qsos, skipped, err := parseFile(writeTemp(t, oneLog("K1ABC","FN42",[]string{"14025","21025"})), "", "IARU-HF")
+	_, qsos, skipped, err := parseFile(writeTemp(t, oneLog("K1ABC", "FN42", []string{"14025", "21025"})), "", "IARU-HF")
 	if err != nil {
 		t.Fatalf("parseFile: %v", err)
 	}
