@@ -10,7 +10,7 @@
 #   make clean        # Remove build artifacts
 
 SHELL := /bin/bash
-.PHONY: help all build install uninstall test clean lint fmt vet wspr solar contest pskr
+.PHONY: help all build install uninstall test clean lint fmt vet wspr solar contest pskr check-spec
 
 # =============================================================================
 # Package Metadata
@@ -51,7 +51,11 @@ DISTDIR      := dist
 # Note: Legacy tools (wspr-ingest, wspr-ingest-cpu, wspr-ingest-fast) removed
 #       due to clickhouse-go/v2 API incompatibility. Replaced by faster tools.
 WSPR_CMDS    := wspr-shredder wspr-turbo wspr-parquet-native wspr-download wspr-backfill wspr-live-download wspr-live-ingest
-SOLAR_CMDS   := solar-ingest solar-download solar-backfill dscovr-ingest
+SOLAR_CMDS   := solar-ingest solar-download solar-backfill dscovr-ingest \
+                solar-kp-download solar-kp-ingest \
+                solar-sfi-download solar-sfi-ingest \
+                solar-ssn-download solar-ssn-ingest \
+                solar-xray-download solar-xray-ingest
 CONTEST_CMDS := contest-download rbn-download rbn-ingest contest-ingest
 PSKR_CMDS    := pskr-collector pskr-ingest
 UTIL_CMDS    := db-validate
@@ -129,7 +133,26 @@ help:
 # Build Targets
 # =============================================================================
 
-all: $(addprefix $(BINDIR_BUILD)/,$(ALL_CMDS))
+# Every binary the RPM spec installs into %{_bindir} must be in ALL_CMDS, or the
+# build succeeds and the PACKAGE fails at %files with "File not found" -- which is
+# what v4.2.0 did: eight solar-*-{download,ingest} commands were added to cmd/ and
+# to the spec, and nobody added them here. Cheap to check, so check it.
+check-spec:
+	@spec=$(NAME).spec; \
+	missing=""; \
+	installed="$(ALL_CMDS) $$(echo '$(SOLAR_SCRIPTS)' | sed 's/\.sh//g')"; \
+	for b in $$(grep -oE '%\{_bindir\}/[a-z0-9-]+' $$spec | sed 's|.*/||' | sort -u); do \
+	  echo "$$installed" | tr ' ' '\n' | grep -qx "$$b" || missing="$$missing $$b"; \
+	done; \
+	if [ -n "$$missing" ]; then \
+	  echo "ERROR: $$spec installs binaries that ALL_CMDS does not build:"; \
+	  for b in $$missing; do echo "         $$b"; done; \
+	  echo "       add them to the appropriate *_CMDS variable in this Makefile."; \
+	  exit 1; \
+	fi; \
+	echo "check-spec: every $$spec %{_bindir} entry is built by ALL_CMDS or installed from SOLAR_SCRIPTS"
+
+all: check-spec $(addprefix $(BINDIR_BUILD)/,$(ALL_CMDS))
 	@printf "\nBuild complete:\n"
 	@for cmd in $(ALL_CMDS); do printf "  $(BINDIR_BUILD)/$$cmd\n"; done
 

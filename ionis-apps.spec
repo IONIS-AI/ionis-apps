@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.2.0
+Version:        4.2.1
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -326,6 +326,17 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Tue Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.2.1-1
+- Makefile: add the eight solar-{kp,sfi,ssn,xray}-{download,ingest} commands to
+  SOLAR_CMDS. They were added to cmd/ and to %files in 4.2.0 but never to the
+  build list, so %files failed with eight "File not found" errors.
+- Makefile: new check-spec target, run as a prerequisite of all, asserting every
+  %{_bindir} entry in the spec is built by ALL_CMDS or installed from
+  SOLAR_SCRIPTS. Fails at build time with a named list instead of at %files.
+- VERSION file was 3.3.0 while the spec was at 4.2.0. The spec passes
+  VERSION=%{version} explicitly so packaged binaries were stamped correctly, but a
+  plain `make` stamped them 3.3.0. Now 4.2.1, matching the spec.
+
 * Tue Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.2.0-1
 - Solar ingest rebuilt: one downloader and one ingester per source, one table per
   source. The old path merged three NOAA streams into a row per (date,time) with
