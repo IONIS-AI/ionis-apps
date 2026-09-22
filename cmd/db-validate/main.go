@@ -40,7 +40,6 @@ var checks = []TableCheck{
 
 	// Derived wspr tables
 	{"wspr", "callsign_grid", 30_000, "wspr"},
-	{"wspr", "silver", 0, "wspr"},
 	{"wspr", "signatures_v1", 0, "wspr"},
 	{"wspr", "gold_stratified", 0, "wspr"},
 	{"wspr", "gold_continuous", 0, "wspr"},
