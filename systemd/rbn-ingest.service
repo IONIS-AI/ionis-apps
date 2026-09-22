@@ -3,7 +3,11 @@ Description=RBN incremental ingest
 After=clickhouse-server.service rbn-download.service
 
 [Service]
+# Site paths. The binaries ship none; see /etc/ionis/paths.conf.
+# Leading "-" so a host that has not been configured yet fails in the tool, with a
+# message naming the variable, rather than in systemd with a missing-file error.
+EnvironmentFile=-/etc/ionis/paths.conf
 Type=oneshot
-ExecStart=/usr/bin/rbn-ingest --src /mnt/rbn-data --host 192.168.1.90:9000
+ExecStart=/usr/bin/rbn-ingest --src ${IONIS_RBN_DATA_DIR} --host ${IONIS_CH_HOST}
 User=ionis-ingest
 Group=ionis-data

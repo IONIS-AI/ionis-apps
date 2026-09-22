@@ -11,6 +11,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 	"log"
 	"os"
 	"os/signal"
@@ -325,8 +326,8 @@ func main() {
 	chDB := flag.String("ch-db", "wspr", "ClickHouse database")
 	chTable := flag.String("ch-table", "bronze", "ClickHouse table")
 	workers := flag.Int("workers", NumWorkers, "Number of parallel file workers")
-	sourceDir := flag.String("source-dir", "/scratch/ai-stack/wspr-data/parquet", "Default Parquet source directory")
-	reportDir := flag.String("report-dir", "/mnt/ai-stack/wspr-data/reports-parquet-native", "Report output directory")
+	sourceDir := flag.String("source-dir", "", "Parquet source directory (default: $IONIS_WSPR_PARQUET_DIR)")
+	reportDir := flag.String("report-dir", "", "Report output directory (default: $IONIS_REPORT_DIR/reports-parquet-native)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "wspr-parquet-native v%s - Native Go Parquet Ingester\n\n", Version)
@@ -341,6 +342,18 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if v, err := common.ResolveReportDir(*reportDir, "reports-parquet-native"); err != nil {
+		log.Fatal(err)
+	} else {
+		*reportDir = v
+	}
+
+	if v, err := common.ResolvePath(*sourceDir, "IONIS_WSPR_PARQUET_DIR", "source-dir", "WSPR parquet directory"); err != nil {
+		log.Fatal(err)
+	} else {
+		*sourceDir = v
+	}
 
 	var inputPaths []string
 	if len(flag.Args()) < 1 {

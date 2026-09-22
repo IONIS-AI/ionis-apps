@@ -4,7 +4,11 @@ After=network-online.target clickhouse-server.service
 Wants=network-online.target
 
 [Service]
+# Site paths. The binaries ship none; see /etc/ionis/paths.conf.
+# Leading "-" so a host that has not been configured yet fails in the tool, with a
+# message naming the variable, rather than in systemd with a missing-file error.
+EnvironmentFile=-/etc/ionis/paths.conf
 Type=oneshot
-ExecStart=/usr/bin/dscovr-ingest -ch-host 192.168.1.90:9000
+ExecStart=/usr/bin/dscovr-ingest -ch-host ${IONIS_CH_HOST}
 User=ionis-ingest
 Group=ionis-data

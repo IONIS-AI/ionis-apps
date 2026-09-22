@@ -3,10 +3,10 @@
 export PATH="$HOME/.duckdb/cli/latest:$PATH"
 
 # Directory containing your CSVs
-IN_DIR="/scratch/ai-stack/wspr-data/csv"
+IN_DIR="/mnt/wspr-data"
 
 # Directory where you want the Parquets
-OUT_DIR="/scratch/ai-stack/wspr-data/parquet"
+OUT_DIR="/mnt/wspr-data/parquet"
 
 # Create output dir if it doesn't exist
 mkdir -p "$OUT_DIR"

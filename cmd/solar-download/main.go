@@ -11,6 +11,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 	"io"
 	"net/http"
 	"os"
@@ -136,7 +137,7 @@ func downloadFile(url, destPath string, timeout time.Duration) error {
 }
 
 func main() {
-	destDir := flag.String("dest", "/mnt/ai-stack/solar-data/raw", "Destination directory")
+	destDir := flag.String("dest", "", "Destination directory (default: $IONIS_SOLAR_DATA_DIR)")
 	timeout := flag.Duration("timeout", 60*time.Second, "HTTP timeout per download")
 	listSources := flag.Bool("list", false, "List available data sources")
 	source := flag.String("source", "all", "Source to download (or 'all')")
@@ -153,6 +154,13 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if v, err := common.ResolvePath(*destDir, "IONIS_SOLAR_DATA_DIR", "dest", "solar raw data directory"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	} else {
+		*destDir = v
+	}
 
 	if *listSources {
 		fmt.Printf("Available solar data sources:\n\n")

@@ -14,7 +14,7 @@
 set -euo pipefail
 
 readonly SCRIPT_VERSION="2.3.2"
-readonly DEFAULT_DIR="/mnt/ai-stack/wspr-data/raw"
+readonly DEFAULT_DIR="/mnt/wspr-data"
 
 # Color codes
 readonly GREEN='\033[0;32m'

@@ -16,7 +16,7 @@
 # =============================================================================
 set -e
 
-SOLAR_DATA_DIR="${SOLAR_DATA_DIR:-/mnt/ai-stack/solar-data/raw}"
+SOLAR_DATA_DIR="${SOLAR_DATA_DIR:-/mnt/solar-data/raw}"
 DO_REFRESH=false
 
 # Parse args

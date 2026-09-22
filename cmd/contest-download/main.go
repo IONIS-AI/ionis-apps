@@ -21,6 +21,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 	"io"
 	"net/http"
 	"os"
@@ -238,7 +239,7 @@ type logEntry struct {
 }
 
 func main() {
-	destDir := flag.String("dest", "/mnt/contest-logs", "Destination directory")
+	destDir := flag.String("dest", "", "Destination directory (default: $IONIS_CONTEST_LOGS_DIR)")
 	contestKey := flag.String("contest", "all", "Contest key (use --list to see options, or 'all')")
 	year := flag.Int("year", 0, "Download only this year (0 = all years)")
 	mode := flag.String("mode", "", "Download only this mode: ph, cw (empty = all modes)")
@@ -265,6 +266,13 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if v, err := common.ResolvePath(*destDir, "IONIS_CONTEST_LOGS_DIR", "dest", "contest log directory"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	} else {
+		*destDir = v
+	}
 
 	if *listContests {
 		fmt.Printf("contest-download v%s\n\n", Version)

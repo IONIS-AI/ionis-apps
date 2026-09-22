@@ -12,6 +12,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+# Site paths. The binaries ship none; see /etc/ionis/paths.conf.
+# Leading "-" so a host that has not been configured yet fails in the tool, with a
+# message naming the variable, rather than in systemd with a missing-file error.
+EnvironmentFile=-/etc/ionis/paths.conf
 Type=oneshot
 User=ionis-ingest
 Group=ionis-data
@@ -20,7 +24,7 @@ Group=ionis-data
 # the time. At 60s it is 24%. The nightly job only fetches the settle window (~3 days), so
 # the slower pace costs us about three minutes and leaves their service alone the rest of
 # the time. There is no deadline on our side; there is a volunteer on theirs.
-ExecStart=/usr/bin/wspr-live-download -dest /mnt/wspr-data/live -delay 60s
+ExecStart=/usr/bin/wspr-live-download -dest ${IONIS_WSPR_LIVE_DIR} -delay 60s
 StandardOutput=journal
 StandardError=journal
 TimeoutStartSec=3600

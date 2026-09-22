@@ -131,6 +131,12 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 # binary they invoke, and a version bump can no longer leave a unit pointing at a flag
 # the new binary does not accept.
 # Accounts the units run as (systemd-sysusers), created at install by %post below.
+# Site paths. The binaries carry none -- see config/paths.conf for why -- so this
+# file is what makes the units work on a given host. %config(noreplace) below, so an
+# upgrade never overwrites an operator's values.
+install -d -m 0755 %{buildroot}%{_sysconfdir}/ionis
+install -p -m 0644 config/paths.conf %{buildroot}%{_sysconfdir}/ionis/paths.conf
+
 install -d -m 0755 %{buildroot}%{_sysusersdir}
 install -p -m 0644 systemd/ionis-apps.sysusers %{buildroot}%{_sysusersdir}/ionis-apps.conf
 install -d -m 0755 %{buildroot}%{_tmpfilesdir}
@@ -170,6 +176,8 @@ install -p -m 0644 systemd/pskr-ingest.service            %{buildroot}%{_unitdir
 install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir}/
 
 %files
+%dir %{_sysconfdir}/ionis
+%config(noreplace) %{_sysconfdir}/ionis/paths.conf
 %{_sysusersdir}/ionis-apps.conf
 %{_tmpfilesdir}/ionis-apps.conf
 %{_datadir}/%{name}/units.list

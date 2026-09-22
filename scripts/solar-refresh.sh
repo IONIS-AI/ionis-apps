@@ -15,7 +15,7 @@
 set -e
 
 VERSION="2.3.2"
-SOLAR_DATA_DIR="${SOLAR_DATA_DIR:-/mnt/ai-stack/solar-data/raw}"
+SOLAR_DATA_DIR="${SOLAR_DATA_DIR:-/mnt/solar-data/raw}"
 
 usage() {
     printf "solar-refresh v%s - Solar Data Refresh Utility\n\n" "$VERSION"

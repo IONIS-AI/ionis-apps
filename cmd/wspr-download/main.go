@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 	"io"
 	"net/http"
 	"os"
@@ -175,7 +176,7 @@ func generateFileList(startYear, startMonth, endYear, endMonth int) []string {
 }
 
 func main() {
-	destDir := flag.String("dest", "/mnt/wspr-data", "Destination directory")
+	destDir := flag.String("dest", "", "Destination directory (default: $IONIS_WSPR_DATA_DIR)")
 	workers := flag.Int("workers", 4, "Parallel download workers")
 	delay := flag.Duration("delay", 1*time.Second, "Delay between HTTP requests per worker")
 	timeout := flag.Duration("timeout", 300*time.Second, "HTTP timeout per download")
@@ -203,6 +204,13 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if v, err := common.ResolvePath(*destDir, "IONIS_WSPR_DATA_DIR", "dest", "WSPR archive directory"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	} else {
+		*destDir = v
+	}
 
 	// Parse start date
 	var startYear, startMonth int

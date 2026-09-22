@@ -33,6 +33,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 	"io"
 	"log"
 	"net/http"
@@ -120,7 +121,7 @@ func fetchDay(ctx context.Context, client *http.Client, endpoint, root string, d
 
 func main() {
 	var (
-		root     = flag.String("dest", "/mnt/wspr-data/live", "Destination root (YYYY/MM/DD.jsonl.gz)")
+		root     = flag.String("dest", "", "Destination root, YYYY/MM/DD.jsonl.gz (default: $IONIS_WSPR_LIVE_DIR)")
 		endpoint = flag.String("endpoint", defaultEndpoint, "ClickHouse HTTP endpoint (wspr.live or wsprdaemon — same schema)")
 		startStr = flag.String("start", "", "Start date YYYY-MM-DD (default: settle window)")
 		endStr   = flag.String("end", "", "End date YYYY-MM-DD exclusive (default: today)")
@@ -139,6 +140,12 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if v, err := common.ResolvePath(*root, "IONIS_WSPR_LIVE_DIR", "dest", "WSPR live capture directory"); err != nil {
+		log.Fatal(err)
+	} else {
+		*root = v
+	}
 
 	log.Printf("wspr-live-download v%s", Version)
 	log.Printf("  endpoint: %s", *endpoint)
