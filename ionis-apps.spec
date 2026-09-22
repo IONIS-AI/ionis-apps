@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.2.1
+Version:        4.2.2
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -326,6 +326,16 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Tue Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.2.2-1
+- contest-ingest: parseFile walked only the FIRST log in a file. Publishers ship
+  bundled logs (116 files in the mirror hold 295 logs between them), so 179 logs
+  and 201,463 QSOs were in the archive and not in bronze. The file parsed, reported
+  no error, and contributed its first station only.
+- Sections are now walked, bounded by START-OF-LOG and END-OF-LOG independently;
+  headers reset per section so each log's QSOs carry the station that logged them.
+- Two callers the same defect hid: the CONTEST: label mismatch check judged only
+  the first log, and grid enrichment enriched only the first station.
+
 * Tue Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.2.1-1
 - Makefile: add the eight solar-{kp,sfi,ssn,xray}-{download,ingest} commands to
   SOLAR_CMDS. They were added to cmd/ and to %files in 4.2.0 but never to the

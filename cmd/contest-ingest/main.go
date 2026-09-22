@@ -293,17 +293,41 @@ func parseQSOLine(fields []string, myCall string) (*QSO, error) {
 	}, nil
 }
 
-// parseFile reads a Cabrillo log file and returns headers + QSOs + skipped count.
-func parseFile(path, myCallOverride string) (*CabrilloHeaders, []*QSO, int, error) {
+// parseFile reads a Cabrillo log file and returns one header set PER LOG SECTION,
+// plus every QSO in the file and the skipped count.
+//
+// A file may hold several operators' logs end to end -- r0hq.log in the IARU mirror
+// is the one that surfaced it. This used to `break` at the first END-OF-LOG, so the
+// file parsed, reported no error, and silently contributed only its first station's
+// QSOs. Bronze is supposed to hold what the archive holds, so sections are walked
+// rather than stopped at.
+//
+// Section boundaries are START-OF-LOG and END-OF-LOG, and either is enough on its
+// own: publishers concatenate both ways, and some final logs carry no END-OF-LOG at
+// all. Headers reset at each boundary, which is what attributes each section's QSOs
+// to the station that logged them instead of to the first station in the file.
+func parseFile(path, myCallOverride string) ([]*CabrilloHeaders, []*QSO, int, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, nil, 0, err
 	}
 	defer file.Close()
 
+	var sections []*CabrilloHeaders
 	headers := &CabrilloHeaders{}
 	var qsos []*QSO
 	var skipped int
+
+	// A section counts as real only once it carries something; that keeps a trailing
+	// END-OF-LOG, or a publisher footer after the last log, from becoming a phantom.
+	seen := false
+	closeSection := func() {
+		if seen {
+			sections = append(sections, headers)
+		}
+		headers = &CabrilloHeaders{}
+		seen = false
+	}
 
 	scanner := bufio.NewScanner(file)
 	// Some contest logs have very long lines
@@ -320,16 +344,25 @@ func parseFile(path, myCallOverride string) (*CabrilloHeaders, []*QSO, int, erro
 			continue
 		}
 
-		// Check for END-OF-LOG
-		if strings.HasPrefix(strings.ToUpper(trimmed), "END-OF-LOG") {
-			break
+		upper := strings.ToUpper(trimmed)
+
+		// Section boundaries. END-OF-LOG closes the current log; START-OF-LOG opens
+		// the next one and also closes any log that never wrote an END-OF-LOG.
+		if strings.HasPrefix(upper, "END-OF-LOG") {
+			closeSection()
+			continue
+		}
+		if strings.HasPrefix(upper, "START-OF-LOG") {
+			closeSection()
+			continue
 		}
 
 		// Parse headers
-		upper := strings.ToUpper(trimmed)
 		if strings.HasPrefix(upper, "CALLSIGN:") {
+			seen = true
 			headers.Callsign = strings.ToUpper(strings.TrimSpace(trimmed[9:]))
 		} else if strings.HasPrefix(upper, "CONTEST:") {
+			seen = true
 			headers.Contest = strings.ToUpper(strings.TrimSpace(trimmed[8:]))
 		} else if strings.HasPrefix(upper, "GRID-LOCATOR:") {
 			g := strings.ToUpper(strings.TrimSpace(trimmed[13:]))
@@ -358,19 +391,23 @@ func parseFile(path, myCallOverride string) (*CabrilloHeaders, []*QSO, int, erro
 				skipped++
 				continue
 			}
+			seen = true
 			qsos = append(qsos, qso)
 		}
 	}
 
+	// The last log usually has an END-OF-LOG and is already closed; some do not.
+	closeSection()
+
 	if err := scanner.Err(); err != nil {
-		return headers, qsos, skipped, fmt.Errorf("scanner error: %w", err)
+		return sections, qsos, skipped, fmt.Errorf("scanner error: %w", err)
 	}
 
 	if skipped > 0 && len(qsos) == 0 {
-		return headers, nil, skipped, fmt.Errorf("all %d QSO lines failed to parse", skipped)
+		return sections, nil, skipped, fmt.Errorf("all %d QSO lines failed to parse", skipped)
 	}
 
-	return headers, qsos, skipped, nil
+	return sections, qsos, skipped, nil
 }
 
 // sourceKey derives a source identifier from a file path relative to srcDir.
@@ -686,7 +723,7 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	src := sourceKey(path, srcDir)
 	relPath := filepath.Join(src, fileName)
 
-	headers, qsos, skipped, err := parseFile(path, "")
+	sections, qsos, skipped, err := parseFile(path, "")
 	if skipped > 0 {
 		stats.SkippedRows.Add(uint64(skipped))
 	}
@@ -721,7 +758,13 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	// A mismatch is worth seeing but never fatal: the usual cause is operator
 	// free-text, and the occasional real one is a misfiled log upstream, which is
 	// a finding about the mirror rather than a reason to drop good QSOs.
-	if h := strings.TrimSpace(headers.Contest); h != "" && h != contestID {
+	// One file can hold several logs, so every section's header gets the same
+	// treatment -- a concatenated file used to be judged by its first log alone.
+	for _, hdr := range sections {
+		h := strings.TrimSpace(hdr.Contest)
+		if h == "" || h == contestID {
+			continue
+		}
 		stats.LabelMismatches.Add(1)
 		if stats.LabelMismatches.Load() <= labelMismatchLogLimit {
 			log.Printf("[%s] CONTEST: header %q -> %s (directory wins)", relPath, h, contestID)
@@ -817,16 +860,22 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	stats.TotalRows.Add(rowCount)
 	stats.TotalFiles.Add(1)
 
-	// Grid enrichment
-	if enrich && headers.Grid != "" && headers.Callsign != "" {
-		entry := GridEntry{
-			Callsign: headers.Callsign,
-			Grid:     headers.Grid,
+	// Grid enrichment -- one entry per log section. A concatenated file used to
+	// enrich only its first station and drop the grids of every station after it.
+	if enrich {
+		var entries []GridEntry
+		for _, hdr := range sections {
+			if hdr.Grid == "" || hdr.Callsign == "" {
+				continue
+			}
+			entries = append(entries, GridEntry{Callsign: hdr.Callsign, Grid: hdr.Grid})
 		}
-		if err := flushGrids(ctx, conn, []GridEntry{entry}); err != nil {
-			log.Printf("[%s] grid enrich error: %v", relPath, err)
-		} else {
-			stats.GridsFound.Add(1)
+		if len(entries) > 0 {
+			if err := flushGrids(ctx, conn, entries); err != nil {
+				log.Printf("[%s] grid enrich error: %v", relPath, err)
+			} else {
+				stats.GridsFound.Add(uint64(len(entries)))
+			}
 		}
 	}
 
