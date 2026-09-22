@@ -1,0 +1,24 @@
+[Unit]
+# Download then ingest, one unit, because a download that succeeds and an ingest
+# that never runs is the failure this whole rebuild exists to remove. If the
+# download fails the ingest does not run and the unit fails; the previous good
+# archive is left untouched on disk.
+Description=Daily sunspot number from SIDC/SILSO (1818-)
+Documentation=https://github.com/IONIS-AI/ionis-apps
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ionis-ingest
+Group=ionis-data
+# Site paths. The binaries ship none; see /etc/ionis-apps/paths.conf.
+EnvironmentFile=-/etc/ionis-apps/paths.conf
+ExecStart=/usr/bin/solar-ssn-download
+ExecStart=/usr/bin/solar-ssn-ingest --host ${IONIS_CH_HOST}
+# A failure here means a gap. Retry rather than wait a whole day for the next timer.
+Restart=on-failure
+RestartSec=15min
+
+[Install]
+WantedBy=multi-user.target

@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.1.1
+Version:        4.2.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -150,6 +150,14 @@ install -d -m 0755 %{buildroot}%{_datadir}/%{name}
 ls systemd/*.service systemd/*.timer | xargs -n1 basename > %{buildroot}%{_datadir}/%{name}/units.list
 
 install -d -m 0755 %{buildroot}%{_unitdir}
+install -p -m 0644 systemd/solar-kp-refresh.service %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-kp-refresh.timer   %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-sfi-refresh.service %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-sfi-refresh.timer   %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-ssn-refresh.service %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-ssn-refresh.timer   %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-xray-refresh.service %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/solar-xray-refresh.timer   %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-download.service       %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-download.timer         %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/solar-backfill.service      %{buildroot}%{_unitdir}/
@@ -241,6 +249,22 @@ fi
 %systemd_postun_with_restart wspr-download.timer wspr-live-download.timer wspr-live-ingest.timer wspr-turbo.timer
 
 %files solar
+%{_bindir}/solar-kp-download
+%{_bindir}/solar-kp-ingest
+%{_bindir}/solar-sfi-download
+%{_bindir}/solar-sfi-ingest
+%{_bindir}/solar-ssn-download
+%{_bindir}/solar-ssn-ingest
+%{_bindir}/solar-xray-download
+%{_bindir}/solar-xray-ingest
+%{_unitdir}/solar-kp-refresh.service
+%{_unitdir}/solar-kp-refresh.timer
+%{_unitdir}/solar-sfi-refresh.service
+%{_unitdir}/solar-sfi-refresh.timer
+%{_unitdir}/solar-ssn-refresh.service
+%{_unitdir}/solar-ssn-refresh.timer
+%{_unitdir}/solar-xray-refresh.service
+%{_unitdir}/solar-xray-refresh.timer
 %{_bindir}/solar-ingest
 %{_bindir}/solar-download
 %{_bindir}/solar-backfill
@@ -302,6 +326,34 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Tue Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.2.0-1
+- Solar ingest rebuilt: one downloader and one ingester per source, one table per
+  source. The old path merged three NOAA streams into a row per (date,time) with
+  max() over whatever had staged, so a stream that failed to download became 0 and
+  the INSERT still succeeded. kp_index was a non-nullable Float32, making a missing
+  Kp and a genuinely quiet Kp=0 the same value. April-August 2026 carry SFI on every
+  row and Kp on none; every run reported success.
+- MINOR: solar.bronze is superseded by solar.{kp,sfi,ssn,xray}_bronze. The old table
+  is retained as solar.bronze_pre_rebuild_20260922. Consumers must be repointed.
+- solar-kp-* : GFZ kp.gfz.de, the DEFINITIVE series 1932-present, re-fetchable in
+  full. NOAA's Kp feed is a 7-day window and was our only source, which is why a
+  missed day was unrecoverable. 276,784 rows, zero incomplete months in 94 years.
+- solar-sfi-*: Penticton/NRC fluxtable.txt, 2004-10-28 to date, 3 observations a day
+  with observed and adjusted flux, against NOAA's 30-day daily rollup.
+- solar-ssn-*: SIDC/SILSO daily sunspot number, 1818-present. Source -1 means NO
+  OBSERVATION and is stored NULL, not -1.
+- solar-xray-*: NOAA GOES, aggregated to 3-hour buckets aligned to the Kp grid --
+  max, mean and sample_count. Max because a flare is defined by its peak and a
+  three-hour mean erases it. Raw files kept dated under xray-archive/ since this
+  endpoint has only a 7-day window and no deep archive.
+- internal/common/archive.go asserts on CONTENT, not HTTP status. Every solar
+  endpoint failure this year returned 200: NOAA changed the Kp payload shape, GFZ
+  moved host and served a 301 page, the DSCOVR products prefix was retired.
+- Two date-range traps found and fixed by loading, not by review: ClickHouse
+  DateTime spans 1970-2106 and silently wrapped GFZ's 1932-1969 into 2068-2106;
+  Date spans 1970-2149 and wrapped SIDC's 1818-1969, losing 10,674 rows with no
+  error. Now DateTime64 and Date32.
+
 * Mon Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.1.1-1
 - contest-ingest takes the contest label from the source DIRECTORY, not the
   CONTEST: header. The header is operator-typed free text and produced 41 labels

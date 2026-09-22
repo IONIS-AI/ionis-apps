@@ -1,0 +1,12 @@
+[Unit]
+Description=Planetary Kp/ap from GFZ (definitive archive, 1932-)
+
+[Timer]
+OnCalendar=02:20
+# Spread the fleet's outbound requests; these are volunteer and public-agency
+# endpoints and a synchronised fleet is rude to both.
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target

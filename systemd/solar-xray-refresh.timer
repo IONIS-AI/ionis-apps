@@ -1,0 +1,12 @@
+[Unit]
+Description=GOES X-ray flux from NOAA SWPC (7-day window, LIVE)
+
+[Timer]
+OnCalendar=*-*-* 01,07,13,19:10:00
+# Spread the fleet's outbound requests; these are volunteer and public-agency
+# endpoints and a synchronised fleet is rude to both.
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target
