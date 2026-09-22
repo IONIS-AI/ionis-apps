@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-// A portable designator can put the callsign on either side of the slash, or in the
+// A compound callsign can put the call on either side of the slash, or in the
 // middle, and both sides can be present at once. The parser used to keep everything
 // before the first slash, which is right for KI7MT/KP4 and wrong for LX/ON9TT -- and
 // being wrong meant the QSO was SKIPPED, not mis-parsed, because parseQSOLine could
@@ -13,7 +13,7 @@ func TestBaseCall(t *testing.T) {
 		{"KI7MT", "KI7MT"},
 		{"ON9TT", "ON9TT"},
 
-		// prefix form -- call is AFTER the slash
+		// location prefix -- call is AFTER the slash
 		{"LX/ON9TT", "ON9TT"},
 		{"9A/S57GM", "S57GM"},
 		{"EA5/RV2A", "RV2A"},
@@ -23,11 +23,12 @@ func TestBaseCall(t *testing.T) {
 		{"KH0/KI7MT", "KI7MT"},
 		{"F/ON4ABC", "ON4ABC"},
 
-		// suffix form, DXCC prefix -- call is BEFORE
+		// location suffix -- call is BEFORE
 		{"KI7MT/KP4", "KI7MT"},
 		{"K1ABC/VP9", "K1ABC"},
 
-		// suffix form, qualifier -- call is BEFORE
+		// operating suffix (/P portable, /M mobile, /MM maritime, /AM aeronautical,
+		// /QRP low power) and call-area change -- call is BEFORE
 		{"DL2AW/P", "DL2AW"},
 		{"W1ABC/MM", "W1ABC"},
 		{"W1ABC/AM", "W1ABC"},
@@ -80,12 +81,12 @@ func TestSelfNotTakenAsWorkedStation(t *testing.T) {
 		t.Fatalf("parseQSOLine: %v", err)
 	}
 	if q.Call2 != "ON9TT" {
-		t.Errorf("Call2 = %q, want ON9TT (the station's own call in portable form was taken as the worked station)", q.Call2)
+		t.Errorf("Call2 = %q, want ON9TT (the station's own call in compound form was taken as the worked station)", q.Call2)
 	}
 }
 
-// A prefix-form worked station must produce a QSO rather than an error, and must be
-// stored verbatim -- bronze is a faithful ingest, so the designator is not normalised away.
+// A location-prefix worked station must produce a QSO rather than an error, and must
+// be stored verbatim -- bronze is a faithful ingest, so the compound form is kept.
 func TestPrefixFormWorkedStationIsKeptVerbatim(t *testing.T) {
 	f := []string{"QSO:", "14025", "CW", "2024-07-13", "1200", "KI7MT", "599", "14", "LX/ON9TT", "599", "28"}
 	q, err := parseQSOLine(f, "KI7MT", "CQ-WW-CW")
