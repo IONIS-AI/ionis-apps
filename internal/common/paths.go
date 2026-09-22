@@ -21,7 +21,7 @@ import (
 // So resolution is: FLAG, then ENVIRONMENT, then FAIL -- and the failure names
 // both, because an error that does not say how to fix it is a second bug.
 //
-// The lab's own values live in /etc/ionis/paths.conf, shipped %config(noreplace)
+// The lab's own values live in /etc/ionis-apps/paths.conf, shipped %config(noreplace)
 // and read by the units through EnvironmentFile. Site configuration belongs in
 // /etc where an operator can see and change it, which is the same pattern
 // fleet-ops already uses for contest-reconcile.
@@ -49,7 +49,7 @@ func ResolvePath(flagValue, envVar, flagName, what string) (string, error) {
 		"no %s configured.\n"+
 			"  Set it one of two ways:\n"+
 			"    --%s <path>   for a one-off run\n"+
-			"    %s=<path>     in /etc/ionis/paths.conf, which the systemd units read\n"+
+			"    %s=<path>     in /etc/ionis-apps/paths.conf, which the systemd units read\n"+
 			"  This binary ships no default on purpose: a compiled-in path is a claim "+
 			"about one machine, made to every machine that installs the package.",
 		what, flagName, envVar)

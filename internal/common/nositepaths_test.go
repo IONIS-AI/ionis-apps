@@ -57,7 +57,7 @@ func TestNoCompiledInSitePaths(t *testing.T) {
 
 	if len(found) > 0 {
 		t.Errorf("%d compiled-in site path default(s). Resolve through "+
-			"common.ResolvePath from /etc/ionis/paths.conf instead:\n  %s",
+			"common.ResolvePath from /etc/ionis-apps/paths.conf instead:\n  %s",
 			len(found), strings.Join(found, "\n  "))
 	}
 }

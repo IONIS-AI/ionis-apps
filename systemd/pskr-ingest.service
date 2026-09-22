@@ -4,10 +4,10 @@ After=clickhouse-server.service pskr-collector.service
 Requires=clickhouse-server.service
 
 [Service]
-# Site paths. The binaries ship none; see /etc/ionis/paths.conf.
+# Site paths. The binaries ship none; see /etc/ionis-apps/paths.conf.
 # Leading "-" so a host that has not been configured yet fails in the tool, with a
 # message naming the variable, rather than in systemd with a missing-file error.
-EnvironmentFile=-/etc/ionis/paths.conf
+EnvironmentFile=-/etc/ionis-apps/paths.conf
 Type=oneshot
 ExecStart=/usr/bin/pskr-ingest --src ${IONIS_PSKR_DATA_DIR} --host ${IONIS_CH_HOST}
 User=ionis-ingest
