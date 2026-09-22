@@ -2,7 +2,8 @@
 // Pure Go implementation - no CUDA/CGO dependencies.
 //
 // Architecture:
-//   io.Reader -> csv.Reader -> Worker Pool (16) -> ClickHouse Batch Insert
+//
+//	io.Reader -> csv.Reader -> Worker Pool (16) -> ClickHouse Batch Insert
 //
 // Optimizations:
 //   - sync.Pool for struct reuse (reduces GC pressure)

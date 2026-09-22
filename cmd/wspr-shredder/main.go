@@ -17,6 +17,7 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 	"io"
 	"log"
 	"net"
@@ -390,8 +391,8 @@ func main() {
 	chDB := flag.String("ch-db", "wspr", "ClickHouse database")
 	chTable := flag.String("ch-table", "bronze", "ClickHouse table")
 	workers := flag.Int("workers", NumWorkers, "Number of parallel file workers")
-	sourceDir := flag.String("source-dir", "/mnt/wspr-data", "Default CSV source directory")
-	reportDir := flag.String("report-dir", "/var/log/ionis/reports-shredder", "Report output directory")
+	sourceDir := flag.String("source-dir", "", "CSV source directory (default: $IONIS_WSPR_DATA_DIR)")
+	reportDir := flag.String("report-dir", "", "Report output directory (default: $IONIS_REPORT_DIR/reports-shredder)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "wspr-shredder v%s - Maximum Throughput WSPR Ingester\n\n", Version)
@@ -406,6 +407,18 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if v, err := common.ResolveReportDir(*reportDir, "reports-shredder"); err != nil {
+		log.Fatal(err)
+	} else {
+		*reportDir = v
+	}
+
+	if v, err := common.ResolvePath(*sourceDir, "IONIS_WSPR_DATA_DIR", "source-dir", "WSPR archive directory"); err != nil {
+		log.Fatal(err)
+	} else {
+		*sourceDir = v
+	}
 
 	// Use default source directory if no paths provided
 	var inputPaths []string

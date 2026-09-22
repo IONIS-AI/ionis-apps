@@ -39,21 +39,21 @@ var Version = "dev"
 // =============================================================================
 
 const (
-	NumWorkers          = 32        // Use all cores for parsing
-	NumWriters          = 2         // Parallel ClickHouse writers
-	BatchSize           = 500_000   // Smaller batches = less memory pressure
-	ClickHouseBatchSize = 2_000_000 // Flush every 2M rows
-	ChannelBuffer       = 64        // Larger buffer for smoother flow
+	NumWorkers          = 32              // Use all cores for parsing
+	NumWriters          = 2               // Parallel ClickHouse writers
+	BatchSize           = 500_000         // Smaller batches = less memory pressure
+	ClickHouseBatchSize = 2_000_000       // Flush every 2M rows
+	ChannelBuffer       = 64              // Larger buffer for smoother flow
 	ReadBufferSize      = 4 * 1024 * 1024 // 4MB read buffer
-	LineBufferSize      = 512       // Max line length
+	LineBufferSize      = 512             // Max line length
 )
 
 // Command-line flags
 var (
-	chHost    = flag.String("ch-host", "127.0.0.1:9000", "ClickHouse address")
-	chDB      = flag.String("ch-db", "wspr", "ClickHouse database")
-	chTable   = flag.String("ch-table", "bronze", "ClickHouse table")
-	silent    = flag.Bool("silent", false, "Suppress progress output")
+	chHost  = flag.String("ch-host", "127.0.0.1:9000", "ClickHouse address")
+	chDB    = flag.String("ch-db", "wspr", "ClickHouse database")
+	chTable = flag.String("ch-table", "bronze", "ClickHouse table")
+	silent  = flag.Bool("silent", false, "Suppress progress output")
 )
 
 // =============================================================================
@@ -134,10 +134,10 @@ func NewStats() *Stats {
 	return &Stats{startTime: time.Now()}
 }
 
-func (s *Stats) AddRows(n uint64)   { atomic.AddUint64(&s.rowsProcessed, n) }
-func (s *Stats) AddBytes(n uint64)  { atomic.AddUint64(&s.bytesRead, n) }
-func (s *Stats) AddBatch()          { atomic.AddUint64(&s.batchesSent, 1) }
-func (s *Stats) GetRows() uint64    { return atomic.LoadUint64(&s.rowsProcessed) }
+func (s *Stats) AddRows(n uint64)  { atomic.AddUint64(&s.rowsProcessed, n) }
+func (s *Stats) AddBytes(n uint64) { atomic.AddUint64(&s.bytesRead, n) }
+func (s *Stats) AddBatch()         { atomic.AddUint64(&s.batchesSent, 1) }
+func (s *Stats) GetRows() uint64   { return atomic.LoadUint64(&s.rowsProcessed) }
 
 func (s *Stats) Report() string {
 	elapsed := time.Since(s.startTime).Seconds()

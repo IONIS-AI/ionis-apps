@@ -39,19 +39,19 @@ var Version = "dev"
 // =============================================================================
 
 const (
-	NumWriters          = 2         // Parallel ClickHouse writers
-	BatchSize           = 500_000   // Rows per batch
-	ClickHouseBatchSize = 2_000_000 // Flush every 2M rows
-	ChannelBuffer       = 64        // Batch channel buffer
+	NumWriters          = 2               // Parallel ClickHouse writers
+	BatchSize           = 500_000         // Rows per batch
+	ClickHouseBatchSize = 2_000_000       // Flush every 2M rows
+	ChannelBuffer       = 64              // Batch channel buffer
 	ReadBufferSize      = 4 * 1024 * 1024 // 4MB read buffer
 )
 
 // Command-line flags
 var (
-	chHost    = flag.String("ch-host", "127.0.0.1:9000", "ClickHouse address")
-	chDB      = flag.String("ch-db", "wspr", "ClickHouse database")
-	chTable   = flag.String("ch-table", "bronze", "ClickHouse table")
-	silent    = flag.Bool("silent", false, "Suppress progress output")
+	chHost  = flag.String("ch-host", "127.0.0.1:9000", "ClickHouse address")
+	chDB    = flag.String("ch-db", "wspr", "ClickHouse database")
+	chTable = flag.String("ch-table", "bronze", "ClickHouse table")
+	silent  = flag.Bool("silent", false, "Suppress progress output")
 )
 
 // =============================================================================
@@ -124,10 +124,10 @@ func NewStats() *Stats {
 	return &Stats{startTime: time.Now()}
 }
 
-func (s *Stats) AddRows(n uint64)   { atomic.AddUint64(&s.rowsProcessed, n) }
-func (s *Stats) AddBytes(n uint64)  { atomic.AddUint64(&s.bytesRead, n) }
-func (s *Stats) AddBatch()          { atomic.AddUint64(&s.batchesSent, 1) }
-func (s *Stats) GetRows() uint64    { return atomic.LoadUint64(&s.rowsProcessed) }
+func (s *Stats) AddRows(n uint64)  { atomic.AddUint64(&s.rowsProcessed, n) }
+func (s *Stats) AddBytes(n uint64) { atomic.AddUint64(&s.bytesRead, n) }
+func (s *Stats) AddBatch()         { atomic.AddUint64(&s.batchesSent, 1) }
+func (s *Stats) GetRows() uint64   { return atomic.LoadUint64(&s.rowsProcessed) }
 
 func (s *Stats) Report() string {
 	elapsed := time.Since(s.startTime).Seconds()
@@ -589,14 +589,14 @@ func main() {
 			Password: "",
 		},
 		Settings: clickhouse.Settings{
-			"max_execution_time":           300,
-			"max_insert_threads":           16, // Match 9950X3D physical cores
-			"input_format_parallel_parsing": 0, // Disable - Go code does parallel work
-			"async_insert":                 1,
-			"wait_for_async_insert":        0,
-			"async_insert_max_data_size":   500000000,
-			"async_insert_busy_timeout_ms": 500,
-			"max_insert_block_size":        1048576,
+			"max_execution_time":            300,
+			"max_insert_threads":            16, // Match 9950X3D physical cores
+			"input_format_parallel_parsing": 0,  // Disable - Go code does parallel work
+			"async_insert":                  1,
+			"wait_for_async_insert":         0,
+			"async_insert_max_data_size":    500000000,
+			"async_insert_busy_timeout_ms":  500,
+			"max_insert_block_size":         1048576,
 		},
 		Compression: &clickhouse.Compression{
 			Method: clickhouse.CompressionLZ4,

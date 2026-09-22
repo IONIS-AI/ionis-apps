@@ -22,11 +22,12 @@ package main
 import (
 	"archive/tar"
 	"bufio"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 
-	"github.com/klauspost/compress/gzip"
 	"context"
 	"flag"
 	"fmt"
+	"github.com/klauspost/compress/gzip"
 	"io"
 	"log"
 	"os"
@@ -51,9 +52,9 @@ import (
 var Version = "dev"
 
 const (
-	BlockSize      = 1_000_000 // 1M rows per block
-	NumWorkers     = 16        // Parallel archive workers
-	NumSenders     = 4         // Parallel block senders per worker
+	BlockSize      = 1_000_000       // 1M rows per block
+	NumWorkers     = 16              // Parallel archive workers
+	NumSenders     = 4               // Parallel block senders per worker
 	ReadBufferSize = 4 * 1024 * 1024 // 4MB read buffer
 )
 
@@ -722,8 +723,8 @@ func main() {
 	chDB := flag.String("ch-db", "wspr", "ClickHouse database")
 	chTable := flag.String("ch-table", "bronze", "ClickHouse table")
 	workers := flag.Int("workers", NumWorkers, "Parallel archive workers")
-	sourceDir := flag.String("source-dir", "/mnt/wspr-data", "Archive source directory")
-	reportDir := flag.String("report-dir", "/var/log/ionis/reports-turbo", "Report output directory")
+	sourceDir := flag.String("source-dir", "", "Archive source directory (default: $IONIS_WSPR_DATA_DIR)")
+	reportDir := flag.String("report-dir", "", "Report output directory (default: $IONIS_REPORT_DIR/reports-turbo)")
 	blockSize := flag.Int("block-size", BlockSize, "Rows per native block")
 	fullMode := flag.Bool("full", false, "Full reload: partition-drop + re-ingest all archives")
 	prime := flag.Bool("prime", false, "Bootstrap watermark for existing archives without loading data")
@@ -752,6 +753,18 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if v, err := common.ResolveReportDir(*reportDir, "reports-turbo"); err != nil {
+		log.Fatal(err)
+	} else {
+		*reportDir = v
+	}
+
+	if v, err := common.ResolvePath(*sourceDir, "IONIS_WSPR_DATA_DIR", "source-dir", "WSPR archive directory"); err != nil {
+		log.Fatal(err)
+	} else {
+		*sourceDir = v
+	}
 
 	// Override block size if specified
 	if *blockSize != BlockSize {

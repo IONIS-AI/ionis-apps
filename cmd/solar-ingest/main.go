@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 	"log"
 	"os"
 	"os/signal"
@@ -377,7 +378,7 @@ func main() {
 	chHost := flag.String("ch-host", "127.0.0.1:9000", "ClickHouse address")
 	chDB := flag.String("ch-db", "solar", "ClickHouse database")
 	chTable := flag.String("ch-table", "bronze", "ClickHouse table")
-	sourceDir := flag.String("source-dir", "/mnt/solar-data/raw", "Solar data source directory")
+	sourceDir := flag.String("source-dir", "", "Solar data source directory (default: $IONIS_SOLAR_DATA_DIR)")
 	truncate := flag.Bool("truncate", false, "Truncate table before insert")
 
 	flag.Usage = func() {
@@ -393,6 +394,12 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if v, err := common.ResolvePath(*sourceDir, "IONIS_SOLAR_DATA_DIR", "source-dir", "solar raw data directory"); err != nil {
+		log.Fatal(err)
+	} else {
+		*sourceDir = v
+	}
 
 	log.Println("=========================================================")
 	log.Printf("Solar Ingest v%s", Version)

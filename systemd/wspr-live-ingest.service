@@ -10,10 +10,14 @@ After=network-online.target clickhouse-server.service wspr-live-download.service
 Wants=network-online.target
 
 [Service]
+# Site paths. The binaries ship none; see /etc/ionis/paths.conf.
+# Leading "-" so a host that has not been configured yet fails in the tool, with a
+# message naming the variable, rather than in systemd with a missing-file error.
+EnvironmentFile=-/etc/ionis/paths.conf
 Type=oneshot
 User=ionis-ingest
 Group=ionis-data
-ExecStart=/usr/bin/wspr-live-ingest -src /mnt/wspr-data/live -host 10.60.1.1:9000
+ExecStart=/usr/bin/wspr-live-ingest -src ${IONIS_WSPR_LIVE_DIR} -host ${IONIS_CH_HOST}
 StandardOutput=journal
 StandardError=journal
 TimeoutStartSec=3600

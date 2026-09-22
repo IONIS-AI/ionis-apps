@@ -82,13 +82,13 @@ var gridRe = regexp.MustCompile(`^[A-R]{2}[0-9]{2}([a-x]{2})?$`)
 
 // collector manages MQTT subscription and JSONL file output.
 type collector struct {
-	outDir   string
-	rotate   time.Duration
-	hfOnly   bool
-	bufSize  int
+	outDir  string
+	rotate  time.Duration
+	hfOnly  bool
+	bufSize int
 
-	spots    chan outputSpot
-	stats    stats
+	spots chan outputSpot
+	stats stats
 
 	mu       sync.Mutex
 	file     *os.File
@@ -98,11 +98,11 @@ type collector struct {
 }
 
 type stats struct {
-	received  atomic.Uint64
-	written   atomic.Uint64
-	filtered  atomic.Uint64
-	invalid   atomic.Uint64
-	errors    atomic.Uint64
+	received atomic.Uint64
+	written  atomic.Uint64
+	filtered atomic.Uint64
+	invalid  atomic.Uint64
+	errors   atomic.Uint64
 }
 
 func newCollector(outDir string, rotate time.Duration, hfOnly bool, bufSize int) *collector {

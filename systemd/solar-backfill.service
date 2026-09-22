@@ -8,6 +8,10 @@ After=network-online.target clickhouse-server.service
 Wants=network-online.target
 
 [Service]
+# Site paths. The binaries ship none; see /etc/ionis/paths.conf.
+# Leading "-" so a host that has not been configured yet fails in the tool, with a
+# message naming the variable, rather than in systemd with a missing-file error.
+EnvironmentFile=-/etc/ionis/paths.conf
 Type=oneshot
 ExecStart=/bin/bash -c '/usr/bin/solar-backfill -start $(date -u -d "30 days ago" +%%Y-%%m-%%d)'
 User=ionis-ingest

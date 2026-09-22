@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 	"io"
 	"net/http"
 	"os"
@@ -46,7 +47,7 @@ const (
 )
 
 func main() {
-	destDir := flag.String("dest", "/mnt/rbn-data", "Destination directory")
+	destDir := flag.String("dest", "", "Destination directory (default: $IONIS_RBN_DATA_DIR)")
 	fromDate := flag.String("from", "2009-02-21", "Start date (YYYY-MM-DD)")
 	toDate := flag.String("to", "", "End date (YYYY-MM-DD, default: yesterday)")
 	year := flag.Int("year", 0, "Download only this year (0 = all years)")
@@ -73,6 +74,13 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if v, err := common.ResolvePath(*destDir, "IONIS_RBN_DATA_DIR", "dest", "RBN archive directory"); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	} else {
+		*destDir = v
+	}
 
 	if *listYears {
 		printYearSummary()
