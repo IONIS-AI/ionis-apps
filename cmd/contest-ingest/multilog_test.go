@@ -45,7 +45,7 @@ func TestParseFileConcatenatedLogs(t *testing.T) {
 		oneLog("DA0HQ", "JO50", []string{"7025"}) +
 		oneLog("9A0HQ", "JN85", []string{"3525", "14030", "28025"})
 
-	_, qsos, skipped, err := parseFile(writeTemp(t, body), "")
+	_, qsos, skipped, err := parseFile(writeTemp(t, body), "", "IARU-HF")
 	if err != nil {
 		t.Fatalf("parseFile: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestParseFileConcatenatedLogs(t *testing.T) {
 
 // A single log must be unchanged by the fix.
 func TestParseFileSingleLogUnchanged(t *testing.T) {
-	_, qsos, skipped, err := parseFile(writeTemp(t, oneLog("K1ABC", "FN42", []string{"14025", "21025"})), "")
+	_, qsos, skipped, err := parseFile(writeTemp(t, oneLog("K1ABC","FN42",[]string{"14025","21025"})), "", "IARU-HF")
 	if err != nil {
 		t.Fatalf("parseFile: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestParseFileUnterminatedAndTrailingJunk(t *testing.T) {
 		"START-OF-LOG: 3.0\nCALLSIGN: W9XYZ\nCONTEST: IARU-HF\n" +
 		"QSO: 14025 CW 2024-07-13 1300 W9XYZ 599 14 DL1ABC 599 28\n" // no END-OF-LOG
 
-	_, qsos, _, err := parseFile(writeTemp(t, body), "")
+	_, qsos, _, err := parseFile(writeTemp(t, body), "", "IARU-HF")
 	if err != nil {
 		t.Fatalf("parseFile: %v", err)
 	}

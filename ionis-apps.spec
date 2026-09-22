@@ -343,8 +343,16 @@ fi
 - contest-ingest: callsign suffix widened from 3 to 6 characters. Special-event calls
   (SN0MARCONI, HG24TISZA, OH100SRAL) were rejected and their QSOs skipped. Verified to
   introduce no false their_call matches across 7,209,211 QSO lines.
-- Together these take worked-station resolution from 99.5123% to 99.9703% on a
-  15,198,848-field sample; the 0.03% residue is malformed log data (7Q1, 9AOHQ).
+- contest-ingest: a QSO is no longer dropped because a callsign fails the shape test.
+  7Q1 is a real licensed Malawi call and ends in a digit, which the regex forbids;
+  2,461 QSOs in one contest-year alone. The regex cannot allow a trailing digit (599
+  and 37 would match), so it keeps its job of LOCATING the field and loses its power
+  to veto the row.
+- contest-ingest: the positional fallback is per contest, from the Cabrillo template.
+  Sweepstakes carries a four-part exchange so its received callsign is at f[9], not
+  the generic f[7] -- a single hardcoded index would have written the SECTION into
+  call_2 for every SS QSO. Indices verified against the mirror, 3,000 lines per
+  contest, 100% agreement on one index each.
 
 * Tue Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.2.1-1
 - Makefile: add the eight solar-{kp,sfi,ssn,xray}-{download,ingest} commands to

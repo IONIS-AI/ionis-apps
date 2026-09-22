@@ -75,7 +75,7 @@ func TestBaseCallAmbiguousPrefixIsAlsoACall(t *testing.T) {
 func TestSelfNotTakenAsWorkedStation(t *testing.T) {
 	// QSO: freq mode date time mycall rst exch theircall rst exch
 	f := []string{"QSO:", "14025", "CW", "2024-07-13", "1200", "KI7MT/KP4", "599", "14", "ON9TT", "599", "28"}
-	q, err := parseQSOLine(f, "KI7MT")
+	q, err := parseQSOLine(f, "KI7MT", "CQ-WW-CW")
 	if err != nil {
 		t.Fatalf("parseQSOLine: %v", err)
 	}
@@ -88,11 +88,92 @@ func TestSelfNotTakenAsWorkedStation(t *testing.T) {
 // stored verbatim -- bronze is a faithful ingest, so the designator is not normalised away.
 func TestPrefixFormWorkedStationIsKeptVerbatim(t *testing.T) {
 	f := []string{"QSO:", "14025", "CW", "2024-07-13", "1200", "KI7MT", "599", "14", "LX/ON9TT", "599", "28"}
-	q, err := parseQSOLine(f, "KI7MT")
+	q, err := parseQSOLine(f, "KI7MT", "CQ-WW-CW")
 	if err != nil {
 		t.Fatalf("parseQSOLine returned %v -- this is the QSO that used to be skipped", err)
 	}
 	if q.Call2 != "LX/ON9TT" {
 		t.Errorf("Call2 = %q, want LX/ON9TT stored verbatim", q.Call2)
+	}
+}
+
+// 7Q1 is a real, licensed Malawi callsign -- it ends in a digit, which the shape
+// regex forbids, and it appears 2,461 times in one contest-year alone. The regex
+// cannot be relaxed to allow a trailing digit, because then 599 and 37 match it and
+// the wrong field becomes the worked station. So the row must survive positionally.
+//
+// Bronze is a faithful ingest. A callsign the parser does not recognise is not a
+// reason to discard the QSO.
+func TestOddCallsignDoesNotDropTheQSO(t *testing.T) {
+	// freq mode date time mycall rst_s exch_s theircall rst_r exch_r
+	f := []string{"QSO:", "28000", "PH", "2024-10-26", "1553", "CQ7K", "59", "14", "7Q1", "59", "37"}
+	q, err := parseQSOLine(f, "CQ7K", "CQ-WW-SSB")
+	if err != nil {
+		t.Fatalf("parseQSOLine returned %v -- a real callsign the regex does not match must not drop the row", err)
+	}
+	if q.Call2 != "7Q1" {
+		t.Errorf("Call2 = %q, want 7Q1 stored verbatim", q.Call2)
+	}
+	if q.Call1 != "CQ7K" {
+		t.Errorf("Call1 = %q, want CQ7K", q.Call1)
+	}
+}
+
+// The fallback must not fire when the scan already found the worked station, and
+// must not invent one from an empty field.
+func TestPositionalFallbackDoesNotOverrideOrInvent(t *testing.T) {
+	// A normal line: the scan finds ON9TT at f[7]; fallback is irrelevant.
+	f := []string{"QSO:", "14025", "CW", "2024-07-13", "1200", "KI7MT", "599", "14", "ON9TT", "599", "28"}
+	q, err := parseQSOLine(f, "KI7MT", "CQ-WW-CW")
+	if err != nil || q.Call2 != "ON9TT" {
+		t.Fatalf("normal line: got %v / %+v", err, q)
+	}
+
+	// Exchange-shifted layout: the worked station is NOT at f[7]. The scan must win,
+	// so the fallback cannot drag it back to the wrong column.
+	g := []string{"QSO:", "14025", "CW", "2024-07-13", "1200", "KI7MT", "599", "MT", "USA", "ON9TT", "599", "ON"}
+	q2, err := parseQSOLine(g, "KI7MT", "CQ-WW-CW")
+	if err != nil {
+		t.Fatalf("shifted layout: %v", err)
+	}
+	if q2.Call2 != "ON9TT" {
+		t.Errorf("shifted layout: Call2 = %q, want ON9TT -- the scan should locate it, not position", q2.Call2)
+	}
+}
+
+// THERE IS A CABRILLO TEMPLATE PER CONTEST. Sweepstakes carries a four-part exchange,
+// so the received callsign is at f[9], not the generic f[7]:
+//
+//	CQ-WW  freq mo date time call rst exch      call rst exch t
+//	SS     freq mo date time call nr p ck sec   call nr p ck sec
+//
+// A single hardcoded fallback index writes the SECTION into call_2 for every SS QSO
+// whose callsign the shape test does not recognise. This is the regression guard.
+func TestSweepstakesTemplateNotGenericTemplate(t *testing.T) {
+	if got := specTheirCallIdx("ARRL-SS-CW"); got != 9 {
+		t.Errorf("ARRL-SS-CW their_call index = %d, want 9", got)
+	}
+	if got := specTheirCallIdx("CQ-WW-CW"); got != 7 {
+		t.Errorf("CQ-WW-CW their_call index = %d, want 7 (generic)", got)
+	}
+	if got := specTheirCallIdx("SOMETHING-NEW"); got != 7 {
+		t.Errorf("unknown contest index = %d, want the generic 7", got)
+	}
+
+	// A real SS line: KA9FOX works WA9LEY. f[7] is the check "49", f[8] the section
+	// "WI", f[9] the callsign. Give it a worked call the shape test cannot match, so
+	// the fallback is what decides -- and prove it lands on the call, not the section.
+	//   QSO: freq mo date time call nr p ck sec call nr p ck sec
+	f := []string{"QSO:", "03539", "CW", "2018-11-05", "0233", "KA9FOX", "0001", "U", "49", "WI",
+		"7Q1", "0264", "U", "63", "IL"}
+	q, err := parseQSOLine(f, "KA9FOX", "ARRL-SS-CW")
+	if err != nil {
+		t.Fatalf("parseQSOLine: %v", err)
+	}
+	if q.Call2 == "WI" {
+		t.Fatalf("Call2 = WI -- the section was stored as the worked station; the generic f[7] fallback was used for a Sweepstakes log")
+	}
+	if q.Call2 != "7Q1" {
+		t.Errorf("Call2 = %q, want 7Q1", q.Call2)
 	}
 }

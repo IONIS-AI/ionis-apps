@@ -48,6 +48,46 @@ const (
 	DefaultWorkers   = 8
 )
 
+// theirCallIdx gives the 0-based index of the RECEIVED CALLSIGN in a QSO line after
+// the "QSO:" token is stripped, per contest.
+//
+// THERE IS A CABRILLO TEMPLATE PER CONTEST, and the received callsign does not sit
+// in one place across them. The generic template is
+//
+//	freq mo date time call rst exch call rst exch t          -> their call at f[7]
+//
+// but Sweepstakes carries a four-part exchange:
+//
+//	freq mo date time call nr p ck sec call nr p ck sec      -> their call at f[9]
+//
+// so a single hardcoded index writes the SECTION into call_2 for every SS QSO. RTTY
+// and digital variants differ again.
+//
+// Verified against the mirror rather than taken on faith: for each contest, the first
+// field after my_call holding a callsign that is not my_call, over 3,000 lines per
+// contest. Every contest came back 100% on ONE index, and ARRL-SS came back f[9] --
+// the published template page says the received call is at "position 10", which
+// counted against a real SS line is the section, not the call. The data wins.
+//
+// Contests absent here fall back to the generic f[7].
+var theirCallIdx = map[string]int{
+	"ARRL-SS-CW":  9,
+	"ARRL-SS-SSB": 9,
+	"CQ-WW-RTTY":  8,
+	"WW-DIGI":     6,
+	"ARRL-DIGI":   6,
+}
+
+const genericTheirCallIdx = 7
+
+// specTheirCallIdx returns the template position for a contest, or the generic one.
+func specTheirCallIdx(contestID string) int {
+	if i, ok := theirCallIdx[contestID]; ok {
+		return i
+	}
+	return genericTheirCallIdx
+}
+
 // callsignRe matches amateur radio callsigns: 1-3 prefix chars, a digit, then a
 // suffix ending in a letter. Covers K1ABC, JA1XYZ, 3DA0NW, VK9DWX.
 //
@@ -228,7 +268,7 @@ func isCallsign(s string) bool {
 //	[N]=their_call [N+1]=rst_rcvd [N+2..end]=exch_rcvd
 //
 // Their-call is found by scanning from index 6 for the next callsign that differs from my_call.
-func parseQSOLine(fields []string, myCall string) (*QSO, error) {
+func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
 	if len(fields) < 9 {
 		return nil, fmt.Errorf("too few fields: %d", len(fields))
 	}
@@ -291,6 +331,29 @@ func parseQSOLine(fields []string, myCall string) (*QSO, error) {
 		}
 	}
 
+	// POSITIONAL FALLBACK -- a QSO is never dropped because a callsign looks odd.
+	//
+	// The scan above is a heuristic for logs whose exchange width varies; Cabrillo
+	// itself is positional, and f[7] IS the worked station in the standard layout
+	//
+	//     freq mode date time mycall rst_s exch_s THEIRCALL rst_r exch_r
+	//
+	// Returning an error here dropped the whole row, and the shape test it depended
+	// on is not a fact about callsigns. 7Q1 -- a licensed Malawi call, 2,461 QSOs in
+	// one contest-year -- ends in a digit, and so do others; the regex demands a
+	// trailing letter. The regex cannot simply be relaxed to allow a trailing digit
+	// because then 599, 14 and 37 match it and the wrong field becomes their_call.
+	//
+	// So the shape test keeps its job of LOCATING the field when the layout is
+	// irregular, and loses its power to veto the row. Bronze is a faithful ingest:
+	// what the log says goes in, and judging it is silver's business. Measured on
+	// cq-ww/2024ph -- 3,509 rows had no field pass the shape test and all 3,509 have
+	// a non-empty f[7].
+	if theirIdx < 0 {
+		if i := specTheirCallIdx(contestID); i < len(f) && strings.TrimSpace(f[i]) != "" {
+			theirIdx = i
+		}
+	}
 	if theirIdx < 0 {
 		return nil, fmt.Errorf("no their_call found")
 	}
@@ -347,7 +410,7 @@ func parseQSOLine(fields []string, myCall string) (*QSO, error) {
 // own: publishers concatenate both ways, and some final logs carry no END-OF-LOG at
 // all. Headers reset at each boundary, which is what attributes each section's QSOs
 // to the station that logged them instead of to the first station in the file.
-func parseFile(path, myCallOverride string) ([]*CabrilloHeaders, []*QSO, int, error) {
+func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*QSO, int, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, nil, 0, err
@@ -427,7 +490,7 @@ func parseFile(path, myCallOverride string) ([]*CabrilloHeaders, []*QSO, int, er
 				continue
 			}
 
-			qso, err := parseQSOLine(fields, myCall)
+			qso, err := parseQSOLine(fields, myCall, contestID)
 			if err != nil {
 				skipped++
 				continue
@@ -764,7 +827,17 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	src := sourceKey(path, srcDir)
 	relPath := filepath.Join(src, fileName)
 
-	sections, qsos, skipped, err := parseFile(path, "")
+	// The contest must be known BEFORE parsing: its Cabrillo template decides where
+	// the received callsign sits, and Sweepstakes does not put it where CQ-WW does.
+	contestID, known := contestFromSource(src)
+	if !known {
+		log.Printf("[%s] unknown contest series in source key %q - not ingested", relPath, src)
+		stats.FailedFiles.Add(1)
+		rejectWriter.Write(relPath, fmt.Sprintf("unknown contest series %q: add it to canonicalContest", src))
+		return 0
+	}
+
+	sections, qsos, skipped, err := parseFile(path, "", contestID)
 	if skipped > 0 {
 		stats.SkippedRows.Add(uint64(skipped))
 	}
@@ -789,13 +862,6 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 
 	// The directory names the contest; the header only gets to disagree in the log.
 	// See the Contest label block above for why the header is not trusted here.
-	contestID, known := contestFromSource(src)
-	if !known {
-		log.Printf("[%s] unknown contest series in source key %q - not ingested", relPath, src)
-		stats.FailedFiles.Add(1)
-		rejectWriter.Write(relPath, fmt.Sprintf("unknown contest series %q: add it to canonicalContest", src))
-		return 0
-	}
 	// A mismatch is worth seeing but never fatal: the usual cause is operator
 	// free-text, and the occasional real one is a misfiled log upstream, which is
 	// a finding about the mirror rather than a reason to drop good QSOs.
