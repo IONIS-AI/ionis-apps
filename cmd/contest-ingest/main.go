@@ -48,9 +48,60 @@ const (
 	DefaultWorkers   = 8
 )
 
-// callsignRe matches amateur radio callsigns: 1-3 prefix chars, a digit, 0-3 suffix chars, ending with a letter.
-// Covers: K1ABC, JA1XYZ, 3DA0NW, VK9DWX, etc.
-var callsignRe = regexp.MustCompile(`^[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,3}[A-Z]$`)
+// theirCallIdx gives the 0-based index of the RECEIVED CALLSIGN in a QSO line after
+// the "QSO:" token is stripped, per contest.
+//
+// THERE IS A CABRILLO TEMPLATE PER CONTEST, and the received callsign does not sit
+// in one place across them. The generic template is
+//
+//	freq mo date time call rst exch call rst exch t          -> their call at f[7]
+//
+// but Sweepstakes carries a four-part exchange:
+//
+//	freq mo date time call nr p ck sec call nr p ck sec      -> their call at f[9]
+//
+// so a single hardcoded index writes the SECTION into call_2 for every SS QSO. RTTY
+// and digital variants differ again.
+//
+// Verified against the mirror rather than taken on faith: for each contest, the first
+// field after my_call holding a callsign that is not my_call, over 3,000 lines per
+// contest. Every contest came back 100% on ONE index, and ARRL-SS came back f[9] --
+// the published template page says the received call is at "position 10", which
+// counted against a real SS line is the section, not the call. The data wins.
+//
+// Contests absent here fall back to the generic f[7].
+var theirCallIdx = map[string]int{
+	"ARRL-SS-CW":  9,
+	"ARRL-SS-SSB": 9,
+	"CQ-WW-RTTY":  8,
+	"WW-DIGI":     6,
+	"ARRL-DIGI":   6,
+}
+
+const genericTheirCallIdx = 7
+
+// specTheirCallIdx returns the template position for a contest, or the generic one.
+func specTheirCallIdx(contestID string) int {
+	if i, ok := theirCallIdx[contestID]; ok {
+		return i
+	}
+	return genericTheirCallIdx
+}
+
+// callsignRe matches amateur radio callsigns: 1-3 prefix chars, a digit, then a
+// suffix ending in a letter. Covers K1ABC, JA1XYZ, 3DA0NW, VK9DWX.
+//
+// THE SUFFIX RUNS TO SIX, NOT THREE. Special-event and commemorative calls carry long
+// suffixes -- SN0MARCONI, HG24TISZA, OH100SRAL, DL60RRDXA -- and a 3-char cap rejected
+// them, so parseQSOLine reported "no their_call found" and SKIPPED the QSO outright.
+// Measured at 6,773 in a 15.2M-field sample (~0.045%).
+//
+// Widening is safe because this regex is also how the worked station is LOCATED among
+// the fields: if it matched an exchange, the wrong field would become their_call.
+// Checked against rst_sent, exch_sent, rst_rcvd and exch_rcvd over 7,209,211 QSO
+// lines -- the wider form matches ZERO that the narrow form did not. An exchange is
+// digits, or letters with no digit, and neither satisfies digit-then-letter-ending.
+var callsignRe = regexp.MustCompile(`^[A-Z0-9]{1,3}[0-9][A-Z0-9]{0,6}[A-Z]$`)
 
 // gridRe matches 4- or 6-character Maidenhead grid locators.
 var gridRe = regexp.MustCompile(`^[A-R]{2}[0-9]{2}([A-X]{2})?$`)
@@ -170,16 +221,44 @@ var batchPool = sync.Pool{
 // isCallsign checks if a string looks like an amateur radio callsign.
 // Must contain both a letter and a digit, be 3+ chars, and match the callsign pattern.
 // Also accepts callsigns with /suffix (e.g., HB9DAX/QRP, W1AW/4).
+// baseCall returns the actual callsign inside a portable designator, or "" if the
+// string holds none.
+//
+// WHICH SIDE OF THE SLASH IS THE CALLSIGN DEPENDS ON THE FORM, so this cannot just
+// take one side -- which is what it used to do, keeping everything before the first
+// slash:
+//
+//	LX/ON9TT      prefix form      the call is AFTER  (ON9TT operating in Luxembourg)
+//	KI7MT/KP4     suffix form      the call is BEFORE (KI7MT operating in KP4)
+//	DL2AW/P       qualifier        the call is BEFORE (portable)
+//	PA/DL2AW/P    both             the call is in the MIDDLE
+//
+// Taking the leading component turned LX/ON9TT into "LX", which matches no callsign
+// pattern, so parseQSOLine reported "no their_call found" and the whole QSO was
+// SKIPPED rather than mis-parsed. Those are systematically the DX -- operators away
+// from their home country -- which is the population this data exists to describe.
+//
+// The rule that works on every form: split on "/" and keep the components that are
+// callsign-shaped. A DXCC prefix is not (KP4, WP4, EA5 end in a digit; LX, 9A, PA
+// have no digit-then-letter), and neither is a qualifier (P, M, MM, QRP), so in
+// practice exactly one component survives. When two do -- VP2E/K1ABC, where the
+// prefix is itself a valid call -- the longer one is the operator and the shorter
+// the location, so length breaks the tie.
+func baseCall(s string) string {
+	best := ""
+	for _, part := range strings.Split(strings.ToUpper(s), "/") {
+		if len(part) < 2 || !callsignRe.MatchString(part) {
+			continue
+		}
+		if len(part) > len(best) {
+			best = part
+		}
+	}
+	return best
+}
+
 func isCallsign(s string) bool {
-	// Strip portable/QRP suffixes for pattern matching
-	base := strings.ToUpper(s)
-	if idx := strings.Index(base, "/"); idx > 0 {
-		base = base[:idx]
-	}
-	if len(base) < 2 {
-		return false
-	}
-	return callsignRe.MatchString(base)
+	return baseCall(s) != ""
 }
 
 // parseQSOLine extracts fields from a Cabrillo QSO line.
@@ -189,7 +268,7 @@ func isCallsign(s string) bool {
 //	[N]=their_call [N+1]=rst_rcvd [N+2..end]=exch_rcvd
 //
 // Their-call is found by scanning from index 6 for the next callsign that differs from my_call.
-func parseQSOLine(fields []string, myCall string) (*QSO, error) {
+func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
 	if len(fields) < 9 {
 		return nil, fmt.Errorf("too few fields: %d", len(fields))
 	}
@@ -244,12 +323,37 @@ func parseQSOLine(fields []string, myCall string) (*QSO, error) {
 	theirIdx := -1
 	for i := 5; i < len(f); i++ {
 		candidate := strings.ToUpper(f[i])
-		if isCallsign(candidate) && !strings.EqualFold(candidate, logCall) {
+		// Compare the calls, not the raw fields: a station logged as KI7MT in the
+		// header and KI7MT/KP4 on the line is still itself.
+		if c := baseCall(candidate); c != "" && c != baseCall(logCall) {
 			theirIdx = i
 			break
 		}
 	}
 
+	// POSITIONAL FALLBACK -- a QSO is never dropped because a callsign looks odd.
+	//
+	// The scan above is a heuristic for logs whose exchange width varies; Cabrillo
+	// itself is positional, and f[7] IS the worked station in the standard layout
+	//
+	//     freq mode date time mycall rst_s exch_s THEIRCALL rst_r exch_r
+	//
+	// Returning an error here dropped the whole row, and the shape test it depended
+	// on is not a fact about callsigns. 7Q1 -- a licensed Malawi call, 2,461 QSOs in
+	// one contest-year -- ends in a digit, and so do others; the regex demands a
+	// trailing letter. The regex cannot simply be relaxed to allow a trailing digit
+	// because then 599, 14 and 37 match it and the wrong field becomes their_call.
+	//
+	// So the shape test keeps its job of LOCATING the field when the layout is
+	// irregular, and loses its power to veto the row. Bronze is a faithful ingest:
+	// what the log says goes in, and judging it is silver's business. Measured on
+	// cq-ww/2024ph -- 3,509 rows had no field pass the shape test and all 3,509 have
+	// a non-empty f[7].
+	if theirIdx < 0 {
+		if i := specTheirCallIdx(contestID); i < len(f) && strings.TrimSpace(f[i]) != "" {
+			theirIdx = i
+		}
+	}
 	if theirIdx < 0 {
 		return nil, fmt.Errorf("no their_call found")
 	}
@@ -293,17 +397,41 @@ func parseQSOLine(fields []string, myCall string) (*QSO, error) {
 	}, nil
 }
 
-// parseFile reads a Cabrillo log file and returns headers + QSOs + skipped count.
-func parseFile(path, myCallOverride string) (*CabrilloHeaders, []*QSO, int, error) {
+// parseFile reads a Cabrillo log file and returns one header set PER LOG SECTION,
+// plus every QSO in the file and the skipped count.
+//
+// A file may hold several operators' logs end to end -- r0hq.log in the IARU mirror
+// is the one that surfaced it. This used to `break` at the first END-OF-LOG, so the
+// file parsed, reported no error, and silently contributed only its first station's
+// QSOs. Bronze is supposed to hold what the archive holds, so sections are walked
+// rather than stopped at.
+//
+// Section boundaries are START-OF-LOG and END-OF-LOG, and either is enough on its
+// own: publishers concatenate both ways, and some final logs carry no END-OF-LOG at
+// all. Headers reset at each boundary, which is what attributes each section's QSOs
+// to the station that logged them instead of to the first station in the file.
+func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*QSO, int, error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, nil, 0, err
 	}
 	defer file.Close()
 
+	var sections []*CabrilloHeaders
 	headers := &CabrilloHeaders{}
 	var qsos []*QSO
 	var skipped int
+
+	// A section counts as real only once it carries something; that keeps a trailing
+	// END-OF-LOG, or a publisher footer after the last log, from becoming a phantom.
+	seen := false
+	closeSection := func() {
+		if seen {
+			sections = append(sections, headers)
+		}
+		headers = &CabrilloHeaders{}
+		seen = false
+	}
 
 	scanner := bufio.NewScanner(file)
 	// Some contest logs have very long lines
@@ -320,16 +448,25 @@ func parseFile(path, myCallOverride string) (*CabrilloHeaders, []*QSO, int, erro
 			continue
 		}
 
-		// Check for END-OF-LOG
-		if strings.HasPrefix(strings.ToUpper(trimmed), "END-OF-LOG") {
-			break
+		upper := strings.ToUpper(trimmed)
+
+		// Section boundaries. END-OF-LOG closes the current log; START-OF-LOG opens
+		// the next one and also closes any log that never wrote an END-OF-LOG.
+		if strings.HasPrefix(upper, "END-OF-LOG") {
+			closeSection()
+			continue
+		}
+		if strings.HasPrefix(upper, "START-OF-LOG") {
+			closeSection()
+			continue
 		}
 
 		// Parse headers
-		upper := strings.ToUpper(trimmed)
 		if strings.HasPrefix(upper, "CALLSIGN:") {
+			seen = true
 			headers.Callsign = strings.ToUpper(strings.TrimSpace(trimmed[9:]))
 		} else if strings.HasPrefix(upper, "CONTEST:") {
+			seen = true
 			headers.Contest = strings.ToUpper(strings.TrimSpace(trimmed[8:]))
 		} else if strings.HasPrefix(upper, "GRID-LOCATOR:") {
 			g := strings.ToUpper(strings.TrimSpace(trimmed[13:]))
@@ -353,24 +490,28 @@ func parseFile(path, myCallOverride string) (*CabrilloHeaders, []*QSO, int, erro
 				continue
 			}
 
-			qso, err := parseQSOLine(fields, myCall)
+			qso, err := parseQSOLine(fields, myCall, contestID)
 			if err != nil {
 				skipped++
 				continue
 			}
+			seen = true
 			qsos = append(qsos, qso)
 		}
 	}
 
+	// The last log usually has an END-OF-LOG and is already closed; some do not.
+	closeSection()
+
 	if err := scanner.Err(); err != nil {
-		return headers, qsos, skipped, fmt.Errorf("scanner error: %w", err)
+		return sections, qsos, skipped, fmt.Errorf("scanner error: %w", err)
 	}
 
 	if skipped > 0 && len(qsos) == 0 {
-		return headers, nil, skipped, fmt.Errorf("all %d QSO lines failed to parse", skipped)
+		return sections, nil, skipped, fmt.Errorf("all %d QSO lines failed to parse", skipped)
 	}
 
-	return headers, qsos, skipped, nil
+	return sections, qsos, skipped, nil
 }
 
 // sourceKey derives a source identifier from a file path relative to srcDir.
@@ -686,7 +827,17 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	src := sourceKey(path, srcDir)
 	relPath := filepath.Join(src, fileName)
 
-	headers, qsos, skipped, err := parseFile(path, "")
+	// The contest must be known BEFORE parsing: its Cabrillo template decides where
+	// the received callsign sits, and Sweepstakes does not put it where CQ-WW does.
+	contestID, known := contestFromSource(src)
+	if !known {
+		log.Printf("[%s] unknown contest series in source key %q - not ingested", relPath, src)
+		stats.FailedFiles.Add(1)
+		rejectWriter.Write(relPath, fmt.Sprintf("unknown contest series %q: add it to canonicalContest", src))
+		return 0
+	}
+
+	sections, qsos, skipped, err := parseFile(path, "", contestID)
 	if skipped > 0 {
 		stats.SkippedRows.Add(uint64(skipped))
 	}
@@ -711,17 +862,16 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 
 	// The directory names the contest; the header only gets to disagree in the log.
 	// See the Contest label block above for why the header is not trusted here.
-	contestID, known := contestFromSource(src)
-	if !known {
-		log.Printf("[%s] unknown contest series in source key %q - not ingested", relPath, src)
-		stats.FailedFiles.Add(1)
-		rejectWriter.Write(relPath, fmt.Sprintf("unknown contest series %q: add it to canonicalContest", src))
-		return 0
-	}
 	// A mismatch is worth seeing but never fatal: the usual cause is operator
 	// free-text, and the occasional real one is a misfiled log upstream, which is
 	// a finding about the mirror rather than a reason to drop good QSOs.
-	if h := strings.TrimSpace(headers.Contest); h != "" && h != contestID {
+	// One file can hold several logs, so every section's header gets the same
+	// treatment -- a concatenated file used to be judged by its first log alone.
+	for _, hdr := range sections {
+		h := strings.TrimSpace(hdr.Contest)
+		if h == "" || h == contestID {
+			continue
+		}
 		stats.LabelMismatches.Add(1)
 		if stats.LabelMismatches.Load() <= labelMismatchLogLimit {
 			log.Printf("[%s] CONTEST: header %q -> %s (directory wins)", relPath, h, contestID)
@@ -817,16 +967,22 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	stats.TotalRows.Add(rowCount)
 	stats.TotalFiles.Add(1)
 
-	// Grid enrichment
-	if enrich && headers.Grid != "" && headers.Callsign != "" {
-		entry := GridEntry{
-			Callsign: headers.Callsign,
-			Grid:     headers.Grid,
+	// Grid enrichment -- one entry per log section. A concatenated file used to
+	// enrich only its first station and drop the grids of every station after it.
+	if enrich {
+		var entries []GridEntry
+		for _, hdr := range sections {
+			if hdr.Grid == "" || hdr.Callsign == "" {
+				continue
+			}
+			entries = append(entries, GridEntry{Callsign: hdr.Callsign, Grid: hdr.Grid})
 		}
-		if err := flushGrids(ctx, conn, []GridEntry{entry}); err != nil {
-			log.Printf("[%s] grid enrich error: %v", relPath, err)
-		} else {
-			stats.GridsFound.Add(1)
+		if len(entries) > 0 {
+			if err := flushGrids(ctx, conn, entries); err != nil {
+				log.Printf("[%s] grid enrich error: %v", relPath, err)
+			} else {
+				stats.GridsFound.Add(uint64(len(entries)))
+			}
 		}
 	}
 

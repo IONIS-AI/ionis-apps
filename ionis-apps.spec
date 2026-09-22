@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.2.1
+Version:        4.2.2
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -326,6 +326,34 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Tue Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.2.2-1
+- contest-ingest: parseFile walked only the FIRST log in a file. Publishers ship
+  bundled logs (116 files in the mirror hold 295 logs between them), so 179 logs
+  and 201,463 QSOs were in the archive and not in bronze. The file parsed, reported
+  no error, and contributed its first station only.
+- Sections are now walked, bounded by START-OF-LOG and END-OF-LOG independently;
+  headers reset per section so each log's QSOs carry the station that logged them.
+- Two callers the same defect hid: the CONTEST: label mismatch check judged only
+  the first log, and grid enrichment enriched only the first station.
+- contest-ingest: isCallsign kept everything before the first "/", which is right for
+  KI7MT/KP4 and DL2AW/P but wrong for LX/ON9TT -- the call is after the slash in the
+  prefix form. Those QSOs were SKIPPED, not mis-parsed. 1,607,413 prefix-form worked
+  calls in the mirror. baseCall now picks the callsign-shaped component whichever side
+  it is on, and handles PA/DL2AW/P where it is in the middle.
+- contest-ingest: callsign suffix widened from 3 to 6 characters. Special-event calls
+  (SN0MARCONI, HG24TISZA, OH100SRAL) were rejected and their QSOs skipped. Verified to
+  introduce no false their_call matches across 7,209,211 QSO lines.
+- contest-ingest: a QSO is no longer dropped because a callsign fails the shape test.
+  7Q1 is a real licensed Malawi call and ends in a digit, which the regex forbids;
+  2,461 QSOs in one contest-year alone. The regex cannot allow a trailing digit (599
+  and 37 would match), so it keeps its job of LOCATING the field and loses its power
+  to veto the row.
+- contest-ingest: the positional fallback is per contest, from the Cabrillo template.
+  Sweepstakes carries a four-part exchange so its received callsign is at f[9], not
+  the generic f[7] -- a single hardcoded index would have written the SECTION into
+  call_2 for every SS QSO. Indices verified against the mirror, 3,000 lines per
+  contest, 100% agreement on one index each.
+
 * Tue Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.2.1-1
 - Makefile: add the eight solar-{kp,sfi,ssn,xray}-{download,ingest} commands to
   SOLAR_CMDS. They were added to cmd/ and to %files in 4.2.0 but never to the
