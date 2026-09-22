@@ -399,6 +399,43 @@ func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
 	}, nil
 }
 
+// ParseReject is one QSO line the parser could not read. A skip used to be a
+// counter and nothing else -- after a run over 823,467 files there was no way to ask
+// which file had dropped anything, or why. Three real defects hid behind that for
+// months. A skip is now a record.
+type ParseReject struct {
+	LineNo  uint32
+	Reason  string // a fixed category, safe for LowCardinality
+	Detail  string // the parser error in full, including the offending value
+	RawLine string
+}
+
+// rejectReason maps a parser error to one of a FIXED SET of categories.
+//
+// The error text carries the offending value -- bad freq "notafreq":
+// strconv.ParseFloat: parsing "notafreq": invalid syntax -- so storing it directly in
+// a LowCardinality column would mint a new distinct string per bad value, which makes
+// LowCardinality worse than String and makes grouping by reason useless. The full
+// error goes to detail; this returns the bucket.
+func rejectReason(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	msg := err.Error()
+	switch {
+	case strings.HasPrefix(msg, "bad freq"):
+		return "bad frequency"
+	case strings.HasPrefix(msg, "bad timestamp"):
+		return "bad timestamp"
+	case strings.HasPrefix(msg, "too few fields"):
+		return "too few fields"
+	case strings.Contains(msg, "no their_call"):
+		return "no worked station"
+	default:
+		return "other"
+	}
+}
+
 // parseFile reads a Cabrillo log file and returns one header set PER LOG SECTION,
 // plus every QSO in the file and the skipped count.
 //
@@ -412,17 +449,33 @@ func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
 // own: publishers concatenate both ways, and some final logs carry no END-OF-LOG at
 // all. Headers reset at each boundary, which is what attributes each section's QSOs
 // to the station that logged them instead of to the first station in the file.
-func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*QSO, int, error) {
+func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*QSO, []ParseReject, error) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, nil, nil, err
 	}
 	defer file.Close()
 
 	var sections []*CabrilloHeaders
 	headers := &CabrilloHeaders{}
 	var qsos []*QSO
-	var skipped int
+	var rejects []ParseReject
+	lineNo := uint32(0)
+
+	// The raw line is kept for review, but a pathological file must not put a
+	// megabyte into one row.
+	const maxRawLine = 512
+	reject := func(reason, detail, raw string) {
+		if len(raw) > maxRawLine {
+			raw = raw[:maxRawLine]
+		}
+		if len(detail) > maxRawLine {
+			detail = detail[:maxRawLine]
+		}
+		rejects = append(rejects, ParseReject{
+			LineNo: lineNo, Reason: reason, Detail: detail, RawLine: raw,
+		})
+	}
 
 	// A section counts as real only once it carries something; that keeps a trailing
 	// END-OF-LOG, or a publisher footer after the last log, from becoming a phantom.
@@ -440,6 +493,7 @@ func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*Q
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for scanner.Scan() {
+		lineNo++
 		line := scanner.Text()
 		// Replace non-breaking spaces (0xA0) with regular spaces.
 		// CTESTWIN, UcxLog, and other loggers pad fixed-width fields with NBSP.
@@ -488,13 +542,15 @@ func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*Q
 				myCall = myCallOverride
 			}
 			if myCall == "" {
-				skipped++
+				// A QSO line before any CALLSIGN: header -- the section does not
+				// say who logged it, so the QSO cannot be attributed.
+				reject("no CALLSIGN header", "QSO line appears before any CALLSIGN: header in its log section", trimmed)
 				continue
 			}
 
 			qso, err := parseQSOLine(fields, myCall, contestID)
 			if err != nil {
-				skipped++
+				reject(rejectReason(err), err.Error(), trimmed)
 				continue
 			}
 			seen = true
@@ -506,14 +562,14 @@ func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*Q
 	closeSection()
 
 	if err := scanner.Err(); err != nil {
-		return sections, qsos, skipped, fmt.Errorf("scanner error: %w", err)
+		return sections, qsos, rejects, fmt.Errorf("scanner error: %w", err)
 	}
 
-	if skipped > 0 && len(qsos) == 0 {
-		return sections, nil, skipped, fmt.Errorf("all %d QSO lines failed to parse", skipped)
+	if len(rejects) > 0 && len(qsos) == 0 {
+		return sections, nil, rejects, fmt.Errorf("all %d QSO lines failed to parse", len(rejects))
 	}
 
-	return sections, qsos, skipped, nil
+	return sections, qsos, rejects, nil
 }
 
 // sourceKey derives a source identifier from a file path relative to srcDir.
@@ -665,6 +721,8 @@ var (
 	labelMismatchLogLimit uint64 = 20
 
 	quarantineTable   = "contest.quarantine"
+	rejectTable       = "contest.parse_rejects"
+	hostName, _       = os.Hostname()
 	quarantineEnabled = true
 	declaredYearRe    = regexp.MustCompile(`(\d{4})`)
 )
@@ -762,6 +820,57 @@ func inDeclaredYear(ts time.Time, y int) bool {
 // flushQuarantine writes held-back QSOs to the quarantine table. Failure here is
 // logged but never fatal: quarantine is a safety net, and a net that takes the
 // whole ingest down when it tears is worse than no net.
+// maxRejectsPerFile caps how many unreadable lines are RECORDED for one file. The
+// count is never capped -- it goes to contest.ingest_log.skipped_rows in full.
+//
+// A systematically mis-parsed contest would otherwise write tens of millions of rows
+// and turn a diagnostic into an outage. Beyond the cap the samples stop being
+// informative anyway: a file sitting at its cap is not telling you about bad lines,
+// it is telling you the parser is wrong about that file.
+const maxRejectsPerFile = 100
+
+// flushParseRejects records the lines the parser could not read, so a skip can be
+// reviewed instead of merely counted.
+func flushParseRejects(ctx context.Context, conn *ch.Client, table string,
+	rejects []ParseReject, filePath, contestID, host string) error {
+	if len(rejects) == 0 {
+		return nil
+	}
+	if len(rejects) > maxRejectsPerFile {
+		rejects = rejects[:maxRejectsPerFile]
+	}
+	var (
+		colPath proto.ColStr
+		colLine proto.ColUInt32
+		colCon  = new(proto.ColStr).LowCardinality()
+		colWhy  = new(proto.ColStr).LowCardinality()
+		colDet  proto.ColStr
+		colRaw  proto.ColStr
+		colHost = new(proto.ColStr).LowCardinality()
+	)
+	for _, r := range rejects {
+		colPath.Append(filePath)
+		colLine.Append(r.LineNo)
+		colCon.Append(contestID)
+		colWhy.Append(r.Reason)
+		colDet.Append(r.Detail)
+		colRaw.Append(r.RawLine)
+		colHost.Append(host)
+	}
+	return conn.Do(ctx, ch.Query{
+		Body: fmt.Sprintf("INSERT INTO %s (file_path, line_no, contest, reason, detail, raw_line, hostname) VALUES", table),
+		Input: proto.Input{
+			{Name: "file_path", Data: colPath},
+			{Name: "line_no", Data: colLine},
+			{Name: "contest", Data: colCon},
+			{Name: "reason", Data: colWhy},
+			{Name: "detail", Data: colDet},
+			{Name: "raw_line", Data: colRaw},
+			{Name: "hostname", Data: colHost},
+		},
+	})
+}
+
 func flushQuarantine(ctx context.Context, conn *ch.Client, rows []*QSO, filePath string, year int, reason string) error {
 	if len(rows) == 0 {
 		return nil
@@ -839,9 +948,9 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 		return 0
 	}
 
-	sections, qsos, skipped, err := parseFile(path, "", contestID)
-	if skipped > 0 {
-		stats.SkippedRows.Add(uint64(skipped))
+	sections, qsos, rejects, err := parseFile(path, "", contestID)
+	if len(rejects) > 0 {
+		stats.SkippedRows.Add(uint64(len(rejects)))
 	}
 	if err != nil {
 		log.Printf("[%s] parse error: %v", relPath, err)
@@ -962,8 +1071,17 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 
 	// Record in watermark
 	wmRelPath := relPathFrom(srcDir, path)
-	if err := watermark.InsertLogEntry(ctx, conn, db, wmRelPath, fileSize, rowCount, elapsedMs); err != nil {
+	if err := watermark.InsertLogEntryWithSkipped(ctx, conn, db, wmRelPath, fileSize, rowCount, uint64(len(rejects)), elapsedMs); err != nil {
 		log.Printf("[%s] watermark insert error: %v", relPath, err)
+	}
+
+	// Record the lines the parser could not read. AFTER the data insert on purpose:
+	// a reject is a diagnostic, and a diagnostic must never be the reason a good
+	// file fails to land. If this write fails the QSOs are already in.
+	if rejectTable != "" && len(rejects) > 0 {
+		if err := flushParseRejects(ctx, conn, rejectTable, rejects, relPath, contestID, hostName); err != nil {
+			log.Printf("[%s] parse-reject insert error: %v", relPath, err)
+		}
 	}
 
 	stats.TotalRows.Add(rowCount)
@@ -1076,6 +1194,7 @@ func main() {
 	prime := flag.Bool("prime", false, "Bootstrap watermark for existing log files without loading data")
 	dryRun := flag.Bool("dry-run", false, "List files that would be processed, then exit")
 	qTable := flag.String("quarantine-table", "contest.quarantine", "Table receiving QSOs dated outside their directory's year")
+	rjTable := flag.String("reject-table", "contest.parse_rejects", "Table receiving QSO lines the parser could not read (empty = disabled)")
 	noQuarantine := flag.Bool("no-quarantine", false, "Admit every QSO regardless of date (disables the date guard)")
 
 	flag.Usage = func() {
@@ -1200,6 +1319,7 @@ func main() {
 		log.Fatalf("Load watermark failed: %v", err)
 	}
 	quarantineTable = *qTable
+	rejectTable = *rjTable
 	quarantineEnabled = !*noQuarantine
 	if quarantineEnabled {
 		log.Printf("Date guard: ON  (off-year QSOs -> %s)", quarantineTable)
