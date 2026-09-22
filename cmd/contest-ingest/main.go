@@ -19,6 +19,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 	"log"
 	"net"
 	"os"
@@ -811,7 +812,7 @@ func discoverFiles(srcDir, contest string) ([]string, error) {
 }
 
 func main() {
-	src := flag.String("src", "/mnt/contest-logs", "Source directory with {contest}/{yearmode}/*.log")
+	src := flag.String("src", "", "Source directory with {contest}/{yearmode}/*.log (default: $IONIS_CONTEST_LOGS_DIR)")
 	host := flag.String("host", "192.168.1.90:9000", "ClickHouse host:port")
 	db := flag.String("db", "contest", "ClickHouse database")
 	table := flag.String("table", "bronze", "ClickHouse table")
@@ -846,6 +847,12 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if v, err := common.ResolvePath(*src, "IONIS_CONTEST_LOGS_DIR", "src", "contest log directory"); err != nil {
+		log.Fatal(err)
+	} else {
+		*src = v
+	}
 
 	log.Println("=========================================================")
 	log.Printf("Contest Ingest v%s", Version)

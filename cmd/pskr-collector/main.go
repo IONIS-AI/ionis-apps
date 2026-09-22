@@ -32,6 +32,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 	"log"
 	"os"
 	"os/signal"
@@ -338,7 +339,7 @@ func (c *collector) reportStats(ctx context.Context, interval time.Duration) {
 func main() {
 	broker := flag.String("broker", "mqtt.pskreporter.info:1883", "MQTT broker address")
 	topic := flag.String("topic", "pskr/filter/v2/#", "MQTT topic filter")
-	outDir := flag.String("outdir", "/mnt/pskr-data", "Output directory for JSONL files")
+	outDir := flag.String("outdir", "", "Output directory for JSONL files (default: $IONIS_PSKR_DATA_DIR)")
 	rotate := flag.Duration("rotate", 1*time.Hour, "File rotation interval")
 	bufSize := flag.Int("buffer", 100000, "Channel buffer size")
 	hfOnly := flag.Bool("hf-only", true, "Filter to HF bands only (160m-10m)")
@@ -360,6 +361,12 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if v, err := common.ResolvePath(*outDir, "IONIS_PSKR_DATA_DIR", "outdir", "PSKR capture directory"); err != nil {
+		log.Fatal(err)
+	} else {
+		*outDir = v
+	}
 
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 

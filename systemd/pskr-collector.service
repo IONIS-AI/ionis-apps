@@ -31,7 +31,7 @@ Group=ionis-data
 
 ExecStart=/usr/bin/pskr-collector \
     --broker mqtt.pskreporter.info:1883 \
-    --outdir /mnt/pskr-data \
+    --outdir ${IONIS_PSKR_DATA_DIR} \
     --rotate 1h \
     --hf-only=true \
     --stats 60s

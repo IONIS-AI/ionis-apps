@@ -23,6 +23,7 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"github.com/IONIS-AI/ionis-apps/internal/common"
 	"io"
 	"log"
 	"net"
@@ -449,7 +450,7 @@ func discoverFiles(srcDir string, year int) ([]string, error) {
 }
 
 func main() {
-	src := flag.String("src", "/mnt/rbn-data", "Source directory with {year}/*.zip")
+	src := flag.String("src", "", "Source directory with {year}/*.zip (default: $IONIS_RBN_DATA_DIR)")
 	host := flag.String("host", "192.168.1.90:9000", "ClickHouse host:port")
 	db := flag.String("db", "rbn", "ClickHouse database")
 	table := flag.String("table", "bronze", "ClickHouse table")
@@ -482,6 +483,12 @@ func main() {
 	}
 
 	flag.Parse()
+
+	if v, err := common.ResolvePath(*src, "IONIS_RBN_DATA_DIR", "src", "RBN archive directory"); err != nil {
+		log.Fatal(err)
+	} else {
+		*src = v
+	}
 
 	log.Println("=========================================================")
 	log.Printf("RBN Ingest v%s", Version)
