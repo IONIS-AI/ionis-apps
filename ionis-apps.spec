@@ -335,6 +335,16 @@ fi
   headers reset per section so each log's QSOs carry the station that logged them.
 - Two callers the same defect hid: the CONTEST: label mismatch check judged only
   the first log, and grid enrichment enriched only the first station.
+- contest-ingest: isCallsign kept everything before the first "/", which is right for
+  KI7MT/KP4 and DL2AW/P but wrong for LX/ON9TT -- the call is after the slash in the
+  prefix form. Those QSOs were SKIPPED, not mis-parsed. 1,607,413 prefix-form worked
+  calls in the mirror. baseCall now picks the callsign-shaped component whichever side
+  it is on, and handles PA/DL2AW/P where it is in the middle.
+- contest-ingest: callsign suffix widened from 3 to 6 characters. Special-event calls
+  (SN0MARCONI, HG24TISZA, OH100SRAL) were rejected and their QSOs skipped. Verified to
+  introduce no false their_call matches across 7,209,211 QSO lines.
+- Together these take worked-station resolution from 99.5123% to 99.9703% on a
+  15,198,848-field sample; the 0.03% residue is malformed log data (7Q1, 9AOHQ).
 
 * Tue Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.2.1-1
 - Makefile: add the eight solar-{kp,sfi,ssn,xray}-{download,ingest} commands to
