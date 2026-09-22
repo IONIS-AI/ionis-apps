@@ -104,6 +104,49 @@ func InsertLogEntry(ctx context.Context, conn *ch.Client, db, filePath string, f
 	})
 }
 
+// InsertLogEntryWithSkipped is InsertLogEntry plus the count of input lines the
+// parser could not read.
+//
+// SEPARATE FUNCTION, DELIBERATELY. Only contest.ingest_log carries skipped_rows --
+// the wspr, rbn and pskr watermark tables do not, and an INSERT naming a column that
+// does not exist fails outright. Adding the parameter to InsertLogEntry would
+// therefore break three ingesters to serve one. When the other sources grow the same
+// column, these two collapse into one.
+//
+// The count here is the TRUE total and is never capped, unlike the sampled lines in
+// contest.parse_rejects. That is the point: after a run over 823,467 files you can
+// ask which files dropped anything, even where the samples were capped.
+func InsertLogEntryWithSkipped(ctx context.Context, conn *ch.Client, db, filePath string, fileSize, rowCount, skippedRows uint64, elapsedMs uint32) error {
+	hostname, _ := os.Hostname()
+
+	colPath := new(proto.ColStr)
+	colSize := new(proto.ColUInt64)
+	colRows := new(proto.ColUInt64)
+	colSkip := new(proto.ColUInt64)
+	colElapsed := new(proto.ColUInt32)
+	colHost := new(proto.ColStr).LowCardinality()
+
+	colPath.Append(filePath)
+	colSize.Append(fileSize)
+	colRows.Append(rowCount)
+	colSkip.Append(skippedRows)
+	colElapsed.Append(elapsedMs)
+	colHost.Append(hostname)
+
+	query := fmt.Sprintf("INSERT INTO %s.ingest_log (file_path, file_size, row_count, skipped_rows, elapsed_ms, hostname) VALUES", db)
+	return conn.Do(ctx, ch.Query{
+		Body: query,
+		Input: proto.Input{
+			{Name: "file_path", Data: colPath},
+			{Name: "file_size", Data: colSize},
+			{Name: "row_count", Data: colRows},
+			{Name: "skipped_rows", Data: colSkip},
+			{Name: "elapsed_ms", Data: colElapsed},
+			{Name: "hostname", Data: colHost},
+		},
+	})
+}
+
 // PrimeFiles marks a list of files as loaded in the watermark without actually loading data.
 // Primed entries have row_count=0 to distinguish them from real loads.
 // Files already in the watermark are skipped.

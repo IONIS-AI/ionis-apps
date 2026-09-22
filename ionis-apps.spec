@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.2.2
+Version:        4.2.3
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -326,6 +326,16 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Tue Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.2.3-1
+- contest-ingest: a skipped QSO line is now RECORDED, not just counted. parseFile
+  returns []ParseReject (line number, category, full parser error, raw line) and
+  the ingester writes them to contest.parse_rejects, capped at 100 lines per file.
+- contest-ingest: the true per-file skip count goes to contest.ingest_log.
+  skipped_rows via watermark.InsertLogEntryWithSkipped, never capped.
+- New --reject-table flag (default contest.parse_rejects, empty disables).
+- Rejects are written AFTER the data insert: a diagnostic must never be the reason
+  a good file fails to land.
+
 * Tue Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.2.2-1
 - contest-ingest: parseFile walked only the FIRST log in a file. Publishers ship
   bundled logs (116 files in the mirror hold 295 logs between them), so 179 logs
