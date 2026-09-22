@@ -390,8 +390,8 @@ func main() {
 	chDB := flag.String("ch-db", "wspr", "ClickHouse database")
 	chTable := flag.String("ch-table", "bronze", "ClickHouse table")
 	workers := flag.Int("workers", NumWorkers, "Number of parallel file workers")
-	sourceDir := flag.String("source-dir", "/scratch/ai-stack/wspr-data/csv", "Default CSV source directory")
-	reportDir := flag.String("report-dir", "/mnt/ai-stack/wspr-data/reports-shredder", "Report output directory")
+	sourceDir := flag.String("source-dir", "/mnt/wspr-data", "Default CSV source directory")
+	reportDir := flag.String("report-dir", "/var/log/ionis/reports-shredder", "Report output directory")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "wspr-shredder v%s - Maximum Throughput WSPR Ingester\n\n", Version)

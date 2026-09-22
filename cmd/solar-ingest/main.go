@@ -377,7 +377,7 @@ func main() {
 	chHost := flag.String("ch-host", "127.0.0.1:9000", "ClickHouse address")
 	chDB := flag.String("ch-db", "solar", "ClickHouse database")
 	chTable := flag.String("ch-table", "bronze", "ClickHouse table")
-	sourceDir := flag.String("source-dir", "/mnt/ai-stack/solar-data/raw", "Solar data source directory")
+	sourceDir := flag.String("source-dir", "/mnt/solar-data/raw", "Solar data source directory")
 	truncate := flag.Bool("truncate", false, "Truncate table before insert")
 
 	flag.Usage = func() {

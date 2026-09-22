@@ -14,8 +14,8 @@
 set -euo pipefail
 
 readonly SCRIPT_VERSION="2.3.2"
-DEFAULT_CSV_SRC="/scratch/ai-stack/wspr-data/csv"
-DEFAULT_PARQUET_DEST="/scratch/ai-stack/wspr-data/parquet"
+DEFAULT_CSV_SRC="/mnt/wspr-data"
+DEFAULT_PARQUET_DEST="/mnt/wspr-data/parquet"
 DEFAULT_THREADS=32
 DEFAULT_PARALLEL_JOBS=4
 

@@ -136,7 +136,7 @@ func downloadFile(url, destPath string, timeout time.Duration) error {
 }
 
 func main() {
-	destDir := flag.String("dest", "/mnt/ai-stack/solar-data/raw", "Destination directory")
+	destDir := flag.String("dest", "/mnt/solar-data/raw", "Destination directory")
 	timeout := flag.Duration("timeout", 60*time.Second, "HTTP timeout per download")
 	listSources := flag.Bool("list", false, "List available data sources")
 	source := flag.String("source", "all", "Source to download (or 'all')")
