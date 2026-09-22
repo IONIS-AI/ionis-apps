@@ -9,10 +9,10 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-# Site paths. The binaries ship none; see /etc/ionis/paths.conf.
+# Site paths. The binaries ship none; see /etc/ionis-apps/paths.conf.
 # Leading "-" so a host that has not been configured yet fails in the tool, with a
 # message naming the variable, rather than in systemd with a missing-file error.
-EnvironmentFile=-/etc/ionis/paths.conf
+EnvironmentFile=-/etc/ionis-apps/paths.conf
 Type=oneshot
 ExecStart=/usr/bin/wspr-download
 User=ionis-ingest

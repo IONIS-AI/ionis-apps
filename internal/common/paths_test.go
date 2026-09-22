@@ -30,7 +30,7 @@ func TestResolvePathFailsWhenUnset(t *testing.T) {
 		t.Fatal("unset must error, not default to anything")
 	}
 	// An error that does not say how to fix it is a second bug.
-	for _, want := range []string{"IONIS_TEST_DIR", "--test-dir", "/etc/ionis/paths.conf", "test directory"} {
+	for _, want := range []string{"IONIS_TEST_DIR", "--test-dir", "/etc/ionis-apps/paths.conf", "test directory"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should name %q, got:\n%s", want, err)
 		}

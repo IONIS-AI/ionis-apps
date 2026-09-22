@@ -134,8 +134,7 @@ make install DESTDIR=%{buildroot} PREFIX=%{_prefix}
 # Site paths. The binaries carry none -- see config/paths.conf for why -- so this
 # file is what makes the units work on a given host. %config(noreplace) below, so an
 # upgrade never overwrites an operator's values.
-install -d -m 0755 %{buildroot}%{_sysconfdir}/ionis
-install -p -m 0644 config/paths.conf %{buildroot}%{_sysconfdir}/ionis/paths.conf
+install -p -m 0644 config/paths.conf %{buildroot}%{_sysconfdir}/%{name}/paths.conf
 
 install -d -m 0755 %{buildroot}%{_sysusersdir}
 install -p -m 0644 systemd/ionis-apps.sysusers %{buildroot}%{_sysusersdir}/ionis-apps.conf
@@ -176,8 +175,7 @@ install -p -m 0644 systemd/pskr-ingest.service            %{buildroot}%{_unitdir
 install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir}/
 
 %files
-%dir %{_sysconfdir}/ionis
-%config(noreplace) %{_sysconfdir}/ionis/paths.conf
+%config(noreplace) %{_sysconfdir}/%{name}/paths.conf
 %{_sysusersdir}/ionis-apps.conf
 %{_tmpfilesdir}/ionis-apps.conf
 %{_datadir}/%{name}/units.list
@@ -306,17 +304,20 @@ fi
 %changelog
 * Mon Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.1.0-1
 - MINOR, not patch: the tools no longer carry site paths, so an upgrade changes
-  how every one of them is configured. A host without /etc/ionis/paths.conf has
+  how every one of them is configured. A host without /etc/ionis-apps/paths.conf has
   tools that refuse to run rather than tools that write somewhere arbitrary --
   the intended behaviour, but not a patch-level change.
 - No compiled-in site paths in any binary. Resolution is flag, then
-  /etc/ionis/paths.conf, then a failure naming both. These ship on COPR, and a
+  /etc/ionis-apps/paths.conf, then a failure naming both. These ship on COPR, and a
   default like /mnt/ai-stack/solar-data/raw is a statement about one machine
   asserted to every machine that installs the package -- and it fails silently,
   because the tool creates the directory it was told to write to and then works
   perfectly. 19 flags across 15 binaries (IONIS-AI/ionis-apps#17, #18)
-- NEW: /etc/ionis/paths.conf, %config(noreplace). Site configuration, carrying
-  this lab's values as a worked example
+- NEW: /etc/ionis-apps/paths.conf, %config(noreplace). Site configuration, carrying
+  this lab's values as a worked example. It lands in %{_sysconfdir}/%{name},
+  which this package has shipped as an EMPTY directory since before this change
+  -- the first draft invented /etc/ionis alongside it, which would have left the
+  package owning two config directories, one of them still empty
 - Shipped units read it through EnvironmentFile. Six of them hardcoded this
   lab's ClickHouse address and disagreed about which -- 192.168.1.90 in four,
   10.60.1.1 in wspr-live-ingest. One value, one place
