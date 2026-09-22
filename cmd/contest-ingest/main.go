@@ -60,10 +60,15 @@ type Stats struct {
 	TotalRows   atomic.Uint64
 	TotalFiles  atomic.Uint64
 	SkippedRows atomic.Uint64
-	Quarantined atomic.Uint64
-	FailedFiles atomic.Uint64
-	GridsFound  atomic.Uint64
-	StartTime   time.Time
+	// LabelMismatches counts files whose CONTEST: header disagreed with the
+	// directory. Not an error -- see the Contest label block -- but a rising count
+	// means the mirror layout and the headers have drifted apart, which is worth
+	// knowing before it is worth acting on.
+	LabelMismatches atomic.Uint64
+	Quarantined     atomic.Uint64
+	FailedFiles     atomic.Uint64
+	GridsFound      atomic.Uint64
+	StartTime       time.Time
 }
 
 // CabrilloHeaders holds parsed header values from a Cabrillo log.
@@ -513,6 +518,9 @@ func flushGrids(ctx context.Context, conn *ch.Client, entries []GridEntry) error
 // ---------------------------------------------------------------------------
 
 var (
+	// Past this many, the mismatch log is noise: the count still climbs.
+	labelMismatchLogLimit uint64 = 20
+
 	quarantineTable   = "contest.quarantine"
 	quarantineEnabled = true
 	declaredYearRe    = regexp.MustCompile(`(\d{4})`)
@@ -531,6 +539,73 @@ func sourceDeclaredYear(src string) (int, bool) {
 		return 0, false
 	}
 	return y, true
+}
+
+// ---------------------------------------------------------------------------
+// Contest label
+//
+// The CONTEST: header is operator-typed free text and cannot be trusted as a
+// dimension. Taking it verbatim -- which is what this ingester used to do --
+// produced 41 distinct labels for 15 contests across 37,495 rows:
+//
+//   CQ-WW-CW, CQ-WW-CW 2005, CQ-WW-CW 05, CQ-WW-CW CONTEST, CQ-WW CW,
+//   CQ- WW- CW, CQWW SSB, CQ-WW-SSB MODE: SSB, CQ-WW-SSB VOICE,
+//   2008 CQ WORLD WIDE DX CONTEST, CW, WW 2010, ...
+//
+// and, from logs whose SOAPBOX prose wrapped onto a line beginning "CONTEST:",
+// entries like "TIMES BECAUSE UNABLE TO CATCH ANY SIGNAL. SORRY FOR THE MANY
+// REPEAT". A GROUP BY contest over that is not a report, it is a word cloud.
+//
+// THE DIRECTORY IS THE AUTHORITY, not the header. contest-download mirrors each
+// publisher's site into <series>/<season>, so "cq-ww/2015cw" states the contest
+// and the mode as a fact about where the file came from -- our own mirror
+// structure, not something an operator typed at 3am after 36 hours of CW. It is
+// already trusted for exactly this reason by sourceDeclaredYear above.
+//
+// UNKNOWN SERIES FAIL LOUDLY. A directory this map does not know means the mirror
+// grew a series we have not classified, and guessing a label for it is how the
+// dimension got polluted in the first place. The file is rejected with its path,
+// which is actionable; a silently mislabelled corpus is not.
+// ---------------------------------------------------------------------------
+
+// canonicalContest maps a series directory to its canonical label. Series that
+// split CW and phone into separate seasons (<year>cw / <year>ph) map to a pair;
+// the rest carry their mode in the series name and use the same label for every
+// season.
+var canonicalContest = map[string]struct{ cw, ph string }{
+	"cq-ww":       {"CQ-WW-CW", "CQ-WW-SSB"},
+	"cq-wpx":      {"CQ-WPX-CW", "CQ-WPX-SSB"},
+	"cq-160":      {"CQ-160-CW", "CQ-160-SSB"},
+	"cq-ww-rtty":  {"CQ-WW-RTTY", "CQ-WW-RTTY"},
+	"cq-wpx-rtty": {"CQ-WPX-RTTY", "CQ-WPX-RTTY"},
+	"arrl-dx-cw":  {"ARRL-DX-CW", "ARRL-DX-CW"},
+	"arrl-dx-ph":  {"ARRL-DX-SSB", "ARRL-DX-SSB"},
+	"arrl-rtty":   {"ARRL-RTTY", "ARRL-RTTY"},
+	"arrl-ss-cw":  {"ARRL-SS-CW", "ARRL-SS-CW"},
+	"arrl-ss-ph":  {"ARRL-SS-SSB", "ARRL-SS-SSB"},
+	"arrl-10m":    {"ARRL-10", "ARRL-10"},
+	"arrl-160m":   {"ARRL-160", "ARRL-160"},
+	"arrl-digi":   {"ARRL-DIGI", "ARRL-DIGI"},
+	"iaru-hf":     {"IARU-HF", "IARU-HF"},
+	"ww-digi":     {"WW-DIGI", "WW-DIGI"},
+}
+
+// contestFromSource resolves a source key to its canonical contest label:
+// "cq-ww/2015cw" -> "CQ-WW-CW". Reports false for a series this map does not
+// know, so the caller can reject the file by name rather than invent a label.
+func contestFromSource(src string) (string, bool) {
+	series, season, found := strings.Cut(src, "/")
+	if !found {
+		return "", false
+	}
+	pair, ok := canonicalContest[strings.ToLower(series)]
+	if !ok {
+		return "", false
+	}
+	if strings.HasSuffix(strings.ToLower(season), "ph") {
+		return pair.ph, true
+	}
+	return pair.cw, true
 }
 
 // inDeclaredYear reports whether ts falls within year y, allowing two days either
@@ -634,7 +709,25 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	defer batchPool.Put(batch)
 	batch.Reset()
 
-	contestID := headers.Contest
+	// The directory names the contest; the header only gets to disagree in the log.
+	// See the Contest label block above for why the header is not trusted here.
+	contestID, known := contestFromSource(src)
+	if !known {
+		log.Printf("[%s] unknown contest series in source key %q - not ingested", relPath, src)
+		stats.FailedFiles.Add(1)
+		rejectWriter.Write(relPath, fmt.Sprintf("unknown contest series %q: add it to canonicalContest", src))
+		return 0
+	}
+	// A mismatch is worth seeing but never fatal: the usual cause is operator
+	// free-text, and the occasional real one is a misfiled log upstream, which is
+	// a finding about the mirror rather than a reason to drop good QSOs.
+	if h := strings.TrimSpace(headers.Contest); h != "" && h != contestID {
+		stats.LabelMismatches.Add(1)
+		if stats.LabelMismatches.Load() <= labelMismatchLogLimit {
+			log.Printf("[%s] CONTEST: header %q -> %s (directory wins)", relPath, h, contestID)
+		}
+	}
+
 	var rowCount uint64
 	startTime := time.Now()
 

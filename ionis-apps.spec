@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.1.0
+Version:        4.1.1
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -302,6 +302,28 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Mon Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.1.1-1
+- contest-ingest takes the contest label from the source DIRECTORY, not the
+  CONTEST: header. The header is operator-typed free text and produced 41 labels
+  for 15 contests across 37,495 rows -- CQ- WW- CW, CQWW SSB, CQ-WW-CW 2005, and
+  one log whose SOAPBOX prose wrapped onto a line beginning CONTEST: and landed
+  "TIMES BECAUSE UNABLE TO CATCH ANY SIGNAL. SORRY FOR THE MANY REPEAT" in the
+  dimension. A GROUP BY contest over that is a word cloud, not a report.
+- contest-download mirrors each publisher's site into <series>/<season>, so
+  "cq-ww/2015cw" states the contest and mode as a fact about where the file came
+  from. sourceDeclaredYear already trusts it for the date guard.
+- An unknown series is REJECTED by name rather than guessed. Guessing is how the
+  dimension got 41 labels.
+- A CONTEST: header disagreeing with the directory is logged, not fatal: usually
+  operator free text, occasionally a genuinely misfiled log upstream, which is a
+  finding about the mirror rather than a reason to drop good QSOs.
+- 15 series directories, 18 canonical labels (four series split cw/ph into
+  separate seasons). Verified against the live mirror: all 201 season directories
+  resolve.
+- SHOULD HAVE BEEN IN 4.1.0. Written and tested before the site-paths work, then
+  left uncommitted in a worktree while that ran. 4.1.0 was tagged and built
+  without it.
+
 * Mon Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.1.0-1
 - MINOR, not patch: the tools no longer carry site paths, so an upgrade changes
   how every one of them is configured. A host without /etc/ionis-apps/paths.conf has
