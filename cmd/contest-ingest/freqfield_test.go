@@ -34,3 +34,41 @@ func TestNonModeSuffixStillFails(t *testing.T) {
 		t.Error("3500P parsed; it should fail as a bad frequency")
 	}
 }
+
+// Every QSO line carries its provenance, and a normalisation is named on the row
+// rather than applied silently -- bronze is packaging, the patches are recorded.
+func TestParsedLinesCarryProvenanceAndPatches(t *testing.T) {
+	body := "START-OF-LOG: 3.0\nCALLSIGN: K1ABC\n" +
+		"QSO:14025 CW 2024-07-13 1200 K1ABC 599 14 ON9TT 599 28\n" +
+		"QSO: 2.3G CW 2024-07-13 1201 K1ABC 599 14 DL1ABC 599 28\n" +
+		"QSO: 14025 CW 2024-07-13 1202 K1ABC 599 14 DL2ABC 599 28\n" +
+		"END-OF-LOG:\n"
+	_, qsos, rejects, err := parseFile(writeTemp(t, body), "", "IARU-HF")
+	if err != nil || len(qsos) != 3 || len(rejects) != 0 {
+		t.Fatalf("got %d QSOs, %d rejects, err %v; want 3, 0, nil", len(qsos), len(rejects), err)
+	}
+	want := [][]string{{"glued-qso-tag"}, {"band-designator"}, nil}
+	for i, q := range qsos {
+		if q.LineNo != uint32(i+3) {
+			t.Errorf("QSO %d: line %d, want %d", i, q.LineNo, i+3)
+		}
+		if q.RawLine == "" {
+			t.Errorf("QSO %d: no raw line", i)
+		}
+		if len(q.Patches) != len(want[i]) || (len(want[i]) > 0 && q.Patches[0] != want[i][0]) {
+			t.Errorf("QSO %d: patches %v, want %v", i, q.Patches, want[i])
+		}
+	}
+}
+
+// The raw line is the line as the file holds it -- not trimmed, not upper-cased.
+func TestRawLineIsVerbatim(t *testing.T) {
+	line := "  qso: 14025 cw 2024-07-13 1200 k1abc 599 14 on9tt 599 28  "
+	_, qsos, _, err := parseFile(writeTemp(t, "CALLSIGN: K1ABC\n"+line+"\n"), "", "IARU-HF")
+	if err != nil || len(qsos) != 1 {
+		t.Fatalf("got %d QSOs, err %v", len(qsos), err)
+	}
+	if qsos[0].RawLine != line {
+		t.Errorf("raw line %q, want %q", qsos[0].RawLine, line)
+	}
+}

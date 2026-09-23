@@ -116,7 +116,7 @@ type Stats struct {
 	// means the mirror layout and the headers have drifted apart, which is worth
 	// knowing before it is worth acting on.
 	LabelMismatches atomic.Uint64
-	Quarantined     atomic.Uint64
+	OffYear         atomic.Uint64
 	FailedFiles     atomic.Uint64
 	GridsFound      atomic.Uint64
 	StartTime       time.Time
@@ -143,13 +143,19 @@ type QSO struct {
 	ExchRcvd  string
 	Contest   string
 	Source    string
+
+	// Provenance and the patches applied to get this line in -- see "BRONZE GETS
+	// EVERYTHING" on processFile.
+	LineNo  uint32
+	RawLine string   // the line exactly as the file holds it
+	Patches []string // named normalisations applied, empty when the line read as-is
 }
 
 // ContestBatch holds columnar data for a batch INSERT into contest.bronze.
 type ContestBatch struct {
-	Timestamp *proto.ColDateTime
-	Frequency *proto.ColUInt32
-	Band      *proto.ColInt32
+	Timestamp *proto.ColNullable[time.Time]
+	Frequency *proto.ColNullable[uint32]
+	Band      *proto.ColNullable[int32]
 	Mode      *proto.ColLowCardinality[string]
 	Call1     *proto.ColStr
 	Call2     *proto.ColStr
@@ -159,13 +165,20 @@ type ContestBatch struct {
 	ExchRcvd  *proto.ColStr
 	Contest   *proto.ColLowCardinality[string]
 	Source    *proto.ColLowCardinality[string]
+
+	FilePath     *proto.ColStr
+	LineNo       *proto.ColUInt32
+	DeclaredYear *proto.ColUInt16
+	RawLine      *proto.ColStr
+	Patches      *proto.ColArr[string]
+	ParseError   *proto.ColStr
 }
 
 func NewContestBatch() *ContestBatch {
 	return &ContestBatch{
-		Timestamp: new(proto.ColDateTime),
-		Frequency: new(proto.ColUInt32),
-		Band:      new(proto.ColInt32),
+		Timestamp: proto.NewColNullable[time.Time](new(proto.ColDateTime)),
+		Frequency: proto.NewColNullable[uint32](new(proto.ColUInt32)),
+		Band:      proto.NewColNullable[int32](new(proto.ColInt32)),
 		Mode:      new(proto.ColStr).LowCardinality(),
 		Call1:     new(proto.ColStr),
 		Call2:     new(proto.ColStr),
@@ -175,6 +188,13 @@ func NewContestBatch() *ContestBatch {
 		ExchRcvd:  new(proto.ColStr),
 		Contest:   new(proto.ColStr).LowCardinality(),
 		Source:    new(proto.ColStr).LowCardinality(),
+
+		FilePath:     new(proto.ColStr),
+		LineNo:       new(proto.ColUInt32),
+		DeclaredYear: new(proto.ColUInt16),
+		RawLine:      new(proto.ColStr),
+		Patches:      proto.NewArray[string](new(proto.ColStr).LowCardinality()),
+		ParseError:   new(proto.ColStr),
 	}
 }
 
@@ -191,6 +211,12 @@ func (b *ContestBatch) Reset() {
 	b.ExchRcvd.Reset()
 	b.Contest.Reset()
 	b.Source.Reset()
+	b.FilePath.Reset()
+	b.LineNo.Reset()
+	b.DeclaredYear.Reset()
+	b.RawLine.Reset()
+	b.Patches.Reset()
+	b.ParseError.Reset()
 }
 
 func (b *ContestBatch) Len() int {
@@ -211,6 +237,12 @@ func (b *ContestBatch) Input() proto.Input {
 		{Name: "exch_rcvd", Data: b.ExchRcvd},
 		{Name: "contest", Data: b.Contest},
 		{Name: "source", Data: b.Source},
+		{Name: "file_path", Data: b.FilePath},
+		{Name: "line_no", Data: b.LineNo},
+		{Name: "declared_year", Data: b.DeclaredYear},
+		{Name: "raw_line", Data: b.RawLine},
+		{Name: "patches", Data: b.Patches},
+		{Name: "parse_error", Data: b.ParseError},
 	}
 }
 
@@ -292,6 +324,7 @@ var gluedFreqModeRe = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)(CW|PH|FM|RY|DG)
 //
 // Their-call is found by scanning from index 6 for the next callsign that differs from my_call.
 func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
+	var patches []string
 	// THE TAG IS NOT ALWAYS ITS OWN FIELD. Some logs write no space after the colon:
 	//
 	//	QSO:14080 RY 2020-02-08 0501  UR8EQ  599  111 RK0UT    599  098
@@ -308,6 +341,7 @@ func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
 	if len(f) > 0 && len(f[0]) >= 4 && strings.EqualFold(f[0][:4], "QSO:") {
 		if rest := f[0][4:]; rest != "" {
 			f = append([]string{rest}, f[1:]...)
+			patches = append(patches, "glued-qso-tag")
 		} else {
 			f = f[1:]
 		}
@@ -319,6 +353,7 @@ func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
 	if len(f) > 0 {
 		if m := gluedFreqModeRe.FindStringSubmatch(f[0]); m != nil {
 			f = append([]string{m[1], m[2]}, f[1:]...)
+			patches = append(patches, "glued-mode")
 		}
 	}
 
@@ -330,7 +365,9 @@ func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
 	// Frequency may be integer (7000) or decimal (1868.79) depending on logging software,
 	// or, above 1 GHz, a Cabrillo band designator (2.3G) rather than a frequency.
 	freqKHz, ok := cabrilloBandKHz[strings.ToUpper(f[0])]
-	if !ok {
+	if ok {
+		patches = append(patches, "band-designator")
+	} else {
 		freqFloat, err := strconv.ParseFloat(f[0], 64)
 		if err != nil {
 			return nil, fmt.Errorf("bad freq %q: %w", f[0], err)
@@ -468,6 +505,7 @@ func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
 		ExchSent:  exchSent,
 		RSTRcvd:   rstRcvd,
 		ExchRcvd:  exchRcvd,
+		Patches:   patches,
 	}, nil
 }
 
@@ -534,13 +572,10 @@ func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*Q
 	var rejects []ParseReject
 	lineNo := uint32(0)
 
-	// The raw line is kept for review, but a pathological file must not put a
-	// megabyte into one row.
+	// The raw line goes to bronze whole -- it is the evidence. Only the parser's own
+	// error text is capped.
 	const maxRawLine = 512
 	reject := func(reason, detail, raw string) {
-		if len(raw) > maxRawLine {
-			raw = raw[:maxRawLine]
-		}
 		if len(detail) > maxRawLine {
 			detail = detail[:maxRawLine]
 		}
@@ -575,7 +610,7 @@ func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*Q
 		// and QARTest among others, and eight vendors do not independently move a
 		// terminator. 889 of 893 are from 2020 alone, which makes it a publisher-side
 		// artifact of that year's archives -- the same class as the 2017 logs
-		// republished under 2018 that contest.quarantine exists for.
+		// republished under 2018 (see off-declared-year).
 		//
 		// So a boundary closes a log only once that log has produced a QSO. A marker
 		// arriving before any QSO is treated as part of the header block and the
@@ -598,6 +633,7 @@ func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*Q
 	for scanner.Scan() {
 		lineNo++
 		line := scanner.Text()
+		rawLine := line
 		// Replace non-breaking spaces (0xA0) with regular spaces.
 		// CTESTWIN, UcxLog, and other loggers pad fixed-width fields with NBSP.
 		line = strings.ReplaceAll(line, "\xa0", " ")
@@ -646,9 +682,11 @@ func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*Q
 			}
 			qso, err := parseQSOLine(fields, myCall, contestID)
 			if err != nil {
-				reject(rejectReason(err), err.Error(), trimmed)
+				reject(rejectReason(err), err.Error(), rawLine)
 				continue
 			}
+			qso.LineNo = lineNo
+			qso.RawLine = rawLine
 			seen = true
 			sectionHasQSO = true
 			qsos = append(qsos, qso)
@@ -727,7 +765,8 @@ func (rw *RejectWriter) Close() {
 func flushBatch(ctx context.Context, conn *ch.Client, tableFQN string, batch *ContestBatch) error {
 	query := fmt.Sprintf(
 		"INSERT INTO %s (timestamp, frequency, band, mode, call_1, call_2, "+
-			"rst_sent, exch_sent, rst_rcvd, exch_rcvd, contest, source) VALUES",
+			"rst_sent, exch_sent, rst_rcvd, exch_rcvd, contest, source, "+
+			"file_path, line_no, declared_year, raw_line, patches, parse_error) VALUES",
 		tableFQN,
 	)
 	return conn.Do(ctx, ch.Query{
@@ -789,8 +828,10 @@ func flushGrids(ctx context.Context, conn *ch.Client, entries []GridEntry) error
 // ---------------------------------------------------------------------------
 // Date validation
 //
-// A QSO must be dated inside the year its source directory declares. That is the
-// whole rule, and it is deliberately all of it.
+// A QSO dated outside the year its source directory declares is tagged
+// off-declared-year. It is not held back: bronze takes every line as sent, and
+// deciding what an off-year QSO means is silver's job (Judge, 2026-09-23 -- until
+// then these went to a separate contest.quarantine table).
 //
 // It exists because upstream sites republish neighbouring years under the wrong
 // path. cqwpxrtty.com/publiclogs/2018/ serves 3,146 logs that are 2017
@@ -817,16 +858,19 @@ var (
 	// Past this many, the mismatch log is noise: the count still climbs.
 	labelMismatchLogLimit uint64 = 20
 
-	quarantineTable   = "contest.quarantine"
-	rejectTable       = "contest.parse_rejects"
-	hostName, _       = os.Hostname()
-	quarantineEnabled = true
-	declaredYearRe    = regexp.MustCompile(`(\d{4})`)
+	declaredYearRe = regexp.MustCompile(`(\d{4})`)
 )
+
+// dateTimeRepresentable reports whether ClickHouse DateTime can hold t. A logger
+// clock set to year 0201 or 3000 parses, but DateTime spans 1970 to 2106; such a
+// row keeps its timestamp in raw_line and stores NULL rather than a wrapped value.
+func dateTimeRepresentable(t time.Time) bool {
+	return !t.Before(time.Unix(0, 0)) && t.Before(time.Date(2106, 2, 7, 6, 28, 15, 0, time.UTC))
+}
 
 // sourceDeclaredYear reports the year a source key claims: "cq-ww/2005cw" -> 2005.
 // Returns false when the key carries no plausible year, in which case the QSO is
-// admitted -- an unrecognised layout must not silently quarantine a whole feed.
+// admitted -- an unrecognised layout must not tag a whole feed off-year.
 func sourceDeclaredYear(src string) (int, bool) {
 	m := declaredYearRe.FindStringSubmatch(src)
 	if m == nil {
@@ -914,122 +958,6 @@ func inDeclaredYear(ts time.Time, y int) bool {
 	return !ts.Before(lo) && ts.Before(hi)
 }
 
-// flushQuarantine writes held-back QSOs to the quarantine table. Failure here is
-// logged but never fatal: quarantine is a safety net, and a net that takes the
-// whole ingest down when it tears is worse than no net.
-// maxRejectsPerFile caps how many unreadable lines are RECORDED for one file. The
-// count is never capped -- it goes to contest.ingest_log.skipped_rows in full.
-//
-// A systematically mis-parsed contest would otherwise write tens of millions of rows
-// and turn a diagnostic into an outage. Beyond the cap the samples stop being
-// informative anyway: a file sitting at its cap is not telling you about bad lines,
-// it is telling you the parser is wrong about that file.
-const maxRejectsPerFile = 100
-
-// flushParseRejects records the lines the parser could not read, so a skip can be
-// reviewed instead of merely counted.
-func flushParseRejects(ctx context.Context, conn *ch.Client, table string,
-	rejects []ParseReject, filePath, contestID, host string) error {
-	if len(rejects) == 0 {
-		return nil
-	}
-	if len(rejects) > maxRejectsPerFile {
-		rejects = rejects[:maxRejectsPerFile]
-	}
-	var (
-		colPath proto.ColStr
-		colLine proto.ColUInt32
-		colCon  = new(proto.ColStr).LowCardinality()
-		colWhy  = new(proto.ColStr).LowCardinality()
-		colDet  proto.ColStr
-		colRaw  proto.ColStr
-		colHost = new(proto.ColStr).LowCardinality()
-	)
-	for _, r := range rejects {
-		colPath.Append(filePath)
-		colLine.Append(r.LineNo)
-		colCon.Append(contestID)
-		colWhy.Append(r.Reason)
-		colDet.Append(r.Detail)
-		colRaw.Append(r.RawLine)
-		colHost.Append(host)
-	}
-	return conn.Do(ctx, ch.Query{
-		Body: fmt.Sprintf("INSERT INTO %s (file_path, line_no, contest, reason, detail, raw_line, hostname) VALUES", table),
-		Input: proto.Input{
-			{Name: "file_path", Data: colPath},
-			{Name: "line_no", Data: colLine},
-			{Name: "contest", Data: colCon},
-			{Name: "reason", Data: colWhy},
-			{Name: "detail", Data: colDet},
-			{Name: "raw_line", Data: colRaw},
-			{Name: "hostname", Data: colHost},
-		},
-	})
-}
-
-func flushQuarantine(ctx context.Context, conn *ch.Client, rows []*QSO, filePath string, year int, reason string) error {
-	if len(rows) == 0 {
-		return nil
-	}
-	var (
-		colTS   proto.ColStr
-		colFreq proto.ColUInt32
-		colBand proto.ColInt32
-		colMode = new(proto.ColStr).LowCardinality()
-		colC1   proto.ColStr
-		colC2   proto.ColStr
-		colRSTS proto.ColStr
-		colExS  proto.ColStr
-		colRSTR proto.ColStr
-		colExR  proto.ColStr
-		colCon  = new(proto.ColStr).LowCardinality()
-		colSrc  = new(proto.ColStr).LowCardinality()
-		colPath proto.ColStr
-		colYear proto.ColUInt16
-		colWhy  = new(proto.ColStr).LowCardinality()
-	)
-	for _, q := range rows {
-		colTS.Append(q.Timestamp.UTC().Format(time.RFC3339))
-		colFreq.Append(q.Frequency)
-		colBand.Append(q.Band)
-		colMode.Append(q.Mode)
-		colC1.Append(q.Call1)
-		colC2.Append(q.Call2)
-		colRSTS.Append(q.RSTSent)
-		colExS.Append(q.ExchSent)
-		colRSTR.Append(q.RSTRcvd)
-		colExR.Append(q.ExchRcvd)
-		colCon.Append(q.Contest)
-		colSrc.Append(q.Source)
-		colPath.Append(filePath)
-		colYear.Append(uint16(year))
-		colWhy.Append(reason)
-	}
-	return conn.Do(ctx, ch.Query{
-		Body: fmt.Sprintf("INSERT INTO %s (timestamp, frequency, band, mode, call_1, call_2, "+
-			"rst_sent, exch_sent, rst_rcvd, exch_rcvd, contest, source, file_path, "+
-			"declared_year, reason) VALUES", quarantineTable),
-		Input: proto.Input{
-			{Name: "timestamp", Data: colTS},
-			{Name: "frequency", Data: colFreq},
-			{Name: "band", Data: colBand},
-			{Name: "mode", Data: colMode},
-			{Name: "call_1", Data: colC1},
-			{Name: "call_2", Data: colC2},
-			{Name: "rst_sent", Data: colRSTS},
-			{Name: "exch_sent", Data: colExS},
-			{Name: "rst_rcvd", Data: colRSTR},
-			{Name: "exch_rcvd", Data: colExR},
-			{Name: "contest", Data: colCon},
-			{Name: "source", Data: colSrc},
-			{Name: "file_path", Data: colPath},
-			{Name: "declared_year", Data: colYear},
-			{Name: "reason", Data: colWhy},
-		},
-	})
-}
-
 func processFile(ctx context.Context, conn *ch.Client, path, srcDir string, pend *pendingBatch, enrich bool, stats *Stats, rejectWriter *RejectWriter) uint64 {
 	fileName := filepath.Base(path)
 	src := sourceKey(path, srcDir)
@@ -1045,37 +973,36 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir string, pend
 		return 0
 	}
 
+	// BRONZE GETS EVERYTHING (Judge, 2026-09-23). Ingest is packaging: the archive is
+	// upstream's tarball, left untouched, and every QSO: line in it becomes one bronze
+	// row -- good, bad or otherwise. Nothing is skipped and nothing is held in a side
+	// table. What it took to get a line in is recorded on the row, the way a package
+	// carries its patches:
+	//
+	//   raw_line     the line exactly as the file holds it, so nothing is ever lost
+	//   patches      named normalisations: glued-qso-tag, glued-mode, band-designator;
+	//                and facts found on the way: off-declared-year,
+	//                timestamp-unrepresentable
+	//   parse_error  set when no patch could make the line read; its typed columns are
+	//                NULL or empty and raw_line carries the content
+	//
+	// Correcting a value is not ingest's job. An off-year QSO lands dated as sent;
+	// what to do with it is a silver decision.
+	startTime := time.Now()
 	sections, qsos, rejects, err := parseFile(path, "", contestID)
-	if len(rejects) > 0 {
-		stats.SkippedRows.Add(uint64(len(rejects)))
-	}
 
-	// RECORD THE REJECTS EVEN WHEN THE FILE FAILS ENTIRELY -- especially then.
-	//
-	// parseFile returns an error when NOTHING parsed, and the error paths below
-	// return early, so the files most worth diagnosing were the ones writing nothing
-	// to contest.parse_rejects. That is exactly backwards: "all 106 QSO lines failed
-	// to parse" tells you a file died and not one thing about why, which is how the
-	// misplaced-END-OF-LOG defect had to be diagnosed by hand from the archive.
-	//
-	// Done before the error checks so every path is covered, and never fatal: a
-	// diagnostic must not be the reason a file is reported differently.
-	if rejectTable != "" && len(rejects) > 0 {
-		if e := flushParseRejects(ctx, conn, rejectTable, rejects, relPath, contestID, hostName); e != nil {
-			log.Printf("[%s] parse-reject insert error: %v", relPath, e)
-		}
-	}
-
-	if err != nil {
-		log.Printf("[%s] parse error: %v", relPath, err)
+	// parseFile reports a file where no line read as an error. Here that is not a
+	// failure: those lines go in as parse-failed rows. A scanner error is -- the file
+	// was not read to the end, and half a file must not be ingested.
+	if err != nil && (strings.HasPrefix(err.Error(), "scanner error") || len(rejects) == 0) {
+		log.Printf("[%s] read error: %v", relPath, err)
 		stats.FailedFiles.Add(1)
 		rejectWriter.Write(relPath, err.Error())
 		return 0
 	}
-
-	if len(qsos) == 0 {
+	if len(qsos) == 0 && len(rejects) == 0 {
 		stats.FailedFiles.Add(1)
-		rejectWriter.Write(relPath, "0 QSOs parsed")
+		rejectWriter.Write(relPath, "0 QSO lines")
 		return 0
 	}
 
@@ -1097,50 +1024,34 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir string, pend
 		}
 	}
 
-	var rowCount uint64
-	startTime := time.Now()
-
-	declaredYear, haveYear := sourceDeclaredYear(src)
-
-	// Pass 1: classify. Nothing is written until the whole file's disposition is
-	// known. Interleaving the two writes meant a quarantine failure could leave
-	// already-flushed bronze rows behind with no watermark, so the retry inserted
-	// them a second time - the guard against duplicates creating duplicates.
-	var held, keep []*QSO
-	for _, qso := range qsos {
-		if quarantineEnabled && haveYear && !inDeclaredYear(qso.Timestamp, declaredYear) {
-			qso.Contest = contestID
-			qso.Source = src
-			held = append(held, qso)
-			continue
-		}
-		keep = append(keep, qso)
-	}
-
-	// Pass 2: quarantine first. If it fails, not one bronze row exists yet, so the
-	// file is cleanly retryable as a whole.
-	if len(held) > 0 {
-		if err := flushQuarantine(ctx, conn, held, relPath, declaredYear, "off-declared-year"); err != nil {
-			log.Printf("[%s] quarantine insert FAILED (%v) - no rows written, file left unwatermarked for retry", relPath, err)
-			stats.FailedFiles.Add(1)
-			rejectWriter.Write(relPath, fmt.Sprintf("quarantine insert failed: %v", err))
-			return 0
-		}
-		stats.Quarantined.Add(uint64(len(held)))
-		rejectWriter.Write(relPath, fmt.Sprintf("%d QSO(s) dated outside declared year %d", len(held), declaredYear))
-	}
-
-	// Pass 3: bronze -- appended to the worker's batch, not written here. The file
-	// goes in whole or not at all: the cancellation check is before the first row,
-	// never between rows, so a batch can not hold half a file.
+	// The file goes in whole or not at all: cancellation is checked before the first
+	// row, never between rows, so a batch cannot hold half a file.
 	if ctx.Err() != nil {
 		return 0
 	}
+
+	declaredYear, haveYear := sourceDeclaredYear(src)
+	dy := uint16(0)
+	if haveYear {
+		dy = uint16(declaredYear)
+	}
 	batch := pend.batch
-	for _, qso := range keep {
-		batch.Timestamp.Append(qso.Timestamp)
-		batch.Frequency.Append(qso.Frequency)
-		batch.Band.Append(qso.Band)
+	var rowCount uint64
+
+	for _, qso := range qsos {
+		patches := qso.Patches
+		ts := proto.NewNullable(qso.Timestamp)
+		if !dateTimeRepresentable(qso.Timestamp) {
+			ts = proto.Null[time.Time]()
+			patches = append(patches, "timestamp-unrepresentable")
+		}
+		if haveYear && !inDeclaredYear(qso.Timestamp, declaredYear) {
+			patches = append(patches, "off-declared-year")
+			pend.offYear++
+		}
+		batch.Timestamp.Append(ts)
+		batch.Frequency.Append(proto.NewNullable(qso.Frequency))
+		batch.Band.Append(proto.NewNullable(qso.Band))
 		batch.Mode.Append(qso.Mode)
 		batch.Call1.Append(qso.Call1)
 		batch.Call2.Append(qso.Call2)
@@ -1150,8 +1061,37 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir string, pend
 		batch.ExchRcvd.Append(qso.ExchRcvd)
 		batch.Contest.Append(contestID)
 		batch.Source.Append(src)
+		batch.FilePath.Append(relPath)
+		batch.LineNo.Append(qso.LineNo)
+		batch.DeclaredYear.Append(dy)
+		batch.RawLine.Append(qso.RawLine)
+		batch.Patches.Append(patches)
+		batch.ParseError.Append("")
 		rowCount++
 	}
+
+	for _, r := range rejects {
+		batch.Timestamp.Append(proto.Null[time.Time]())
+		batch.Frequency.Append(proto.Null[uint32]())
+		batch.Band.Append(proto.Null[int32]())
+		batch.Mode.Append("")
+		batch.Call1.Append("")
+		batch.Call2.Append("")
+		batch.RSTSent.Append("")
+		batch.ExchSent.Append("")
+		batch.RSTRcvd.Append("")
+		batch.ExchRcvd.Append("")
+		batch.Contest.Append(contestID)
+		batch.Source.Append(src)
+		batch.FilePath.Append(relPath)
+		batch.LineNo.Append(r.LineNo)
+		batch.DeclaredYear.Append(dy)
+		batch.RawLine.Append(r.RawLine)
+		batch.Patches.Append([]string{"parse-failed"})
+		batch.ParseError.Append(r.Detail)
+		rowCount++
+	}
+	pend.parseFailed += uint64(len(rejects))
 
 	// Parse time only: the INSERT that carries these rows happens later, for many files.
 	elapsedMs := uint32(time.Since(startTime).Milliseconds())
@@ -1201,6 +1141,9 @@ type pendingBatch struct {
 	entries []watermark.LogEntry
 	grids   []GridEntry
 	rows    uint64
+
+	offYear     uint64
+	parseFailed uint64
 }
 
 func (p *pendingBatch) reset() {
@@ -1208,6 +1151,8 @@ func (p *pendingBatch) reset() {
 	p.entries = p.entries[:0]
 	p.grids = p.grids[:0]
 	p.rows = 0
+	p.offYear = 0
+	p.parseFailed = 0
 }
 
 // commit writes the batch, then the watermark for every file in it, then any grids.
@@ -1233,6 +1178,8 @@ func (p *pendingBatch) commit(ctx context.Context, conn *ch.Client, db, tableFQN
 	}
 
 	stats.TotalRows.Add(p.rows)
+	stats.OffYear.Add(p.offYear)
+	stats.SkippedRows.Add(p.parseFailed)
 	stats.TotalFiles.Add(uint64(len(p.entries)))
 
 	if len(p.grids) > 0 {
@@ -1337,9 +1284,6 @@ func main() {
 	fullMode := flag.Bool("full", false, "Full reload: re-ingest all files, update watermark")
 	prime := flag.Bool("prime", false, "Bootstrap watermark for existing log files without loading data")
 	dryRun := flag.Bool("dry-run", false, "List files that would be processed, then exit")
-	qTable := flag.String("quarantine-table", "contest.quarantine", "Table receiving QSOs dated outside their directory's year")
-	rjTable := flag.String("reject-table", "contest.parse_rejects", "Table receiving QSO lines the parser could not read (empty = disabled)")
-	noQuarantine := flag.Bool("no-quarantine", false, "Admit every QSO regardless of date (disables the date guard)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "contest-ingest v%s — Parse Cabrillo contest logs into ClickHouse\n\n", Version)
@@ -1462,14 +1406,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Load watermark failed: %v", err)
 	}
-	quarantineTable = *qTable
-	rejectTable = *rjTable
-	quarantineEnabled = !*noQuarantine
-	if quarantineEnabled {
-		log.Printf("Date guard: ON  (off-year QSOs -> %s)", quarantineTable)
-	} else {
-		log.Printf("Date guard: OFF (--no-quarantine)")
-	}
+	log.Printf("Bronze:   every QSO: line, as sent (off-year and unreadable lines tagged, not held)")
 
 	log.Printf("Watermark: %d file(s) already loaded", len(wm))
 
@@ -1549,11 +1486,9 @@ func main() {
 	log.Println("=========================================================")
 	log.Printf("Files OK:       %d", totalFiles)
 	log.Printf("Files Failed:   %d", failedFiles)
-	log.Printf("QSOs Inserted:  %d", totalRows)
-	log.Printf("QSOs Skipped:   %d", skippedRows)
-	if q := stats.Quarantined.Load(); q > 0 {
-		log.Printf("QSOs Held:      %d (dated outside declared year -> %s)", q, quarantineTable)
-	}
+	log.Printf("Rows Inserted:  %d (one per QSO: line)", totalRows)
+	log.Printf("  parse-failed: %d (typed columns empty, raw_line kept)", skippedRows)
+	log.Printf("  off-year:     %d (dated outside the directory's year, as sent)", stats.OffYear.Load())
 	log.Printf("Grids Enriched: %d", gridsFound)
 	log.Printf("Elapsed:        %v", elapsed.Round(time.Second))
 	if rps > 1_000_000 {
