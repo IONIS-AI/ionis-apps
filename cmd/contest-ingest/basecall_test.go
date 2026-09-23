@@ -215,3 +215,45 @@ func TestShortLineStillRejectedAfterTagSplit(t *testing.T) {
 		t.Error("a 3-field line was accepted; the count check must apply after the tag is split off")
 	}
 }
+
+// callsignRe demands a trailing letter, and real callsigns do not always have one.
+// Gating the LOGGING station on it rejected whole files: 226 QSOs for LM1814 (the
+// Norwegian constitution bicentenary station), 110 for SZ3PC20.
+//
+// This was a regression introduced by the fix that made the header a fallback -- the
+// worked-station side was made lenient and the logging-station side strict in the same
+// change. callsignRe is a LOCATOR for finding the worked station among variable-width
+// exchange fields. It is not a validator, and it has twice been used as one.
+func TestLoggingStationIsNotHeldToTheCallsignPattern(t *testing.T) {
+	for _, call := range []string{"LM1814", "SZ3PC20", "7Q1", "9UXEV", "K1ABC"} {
+		f := []string{"QSO:", "7045", "RY", "2014-02-08", "0545", call, "599", "0001", "HG1S", "599", "0002"}
+		q, err := parseQSOLine(f, "", "CQ-WPX-RTTY")
+		if err != nil {
+			t.Errorf("parseQSOLine with Call1=%q: %v -- a real station was refused for its spelling", call, err)
+			continue
+		}
+		if q.Call1 != call {
+			t.Errorf("Call1 = %q, want %q stored as written", q.Call1, call)
+		}
+		if q.Call2 != "HG1S" {
+			t.Errorf("Call1=%q: Call2 = %q, want HG1S", call, q.Call2)
+		}
+	}
+}
+
+// The one thing still refused is a field with nothing callsign-like in it -- the
+// template placeholder -- which is not a spelling of a station.
+func TestPlaceholderLoggingStationStillRefused(t *testing.T) {
+	f := []string{"QSO:", "14025", "CW", "2024-07-13", "1200", "*************", "599", "14", "ON9TT", "599", "28"}
+	if _, err := parseQSOLine(f, "", "IARU-HF"); err == nil {
+		t.Error("a placeholder was accepted as the logging station")
+	}
+	// ...unless a header names the station, in which case the line is rescued.
+	q, err := parseQSOLine(f, "K1ABC", "IARU-HF")
+	if err != nil {
+		t.Fatalf("with header: %v", err)
+	}
+	if q.Call1 != "K1ABC" {
+		t.Errorf("Call1 = %q, want K1ABC from the header", q.Call1)
+	}
+}

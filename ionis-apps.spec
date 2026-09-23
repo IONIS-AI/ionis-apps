@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.2.4
+Version:        4.2.5
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -326,6 +326,15 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Wed Sep 23 2026 Bob <bob@ipa.home.arpa> - 4.2.5-1
+- contest-ingest: the logging station is no longer held to callsignRe. That regex
+  demands a trailing letter and real callsigns do not always have one -- LM1814,
+  SZ3PC20, 7Q1 -- and since every QSO line in a file carries the same station, a
+  failing callsign rejected the WHOLE FILE. A regression from 4.2.4, which made the
+  worked-station side lenient and the logging-station side strict in one change.
+  callsignRe is a LOCATOR for finding the worked station among variable-width
+  exchange fields; it is not a validator, and it had twice been used as one.
+
 * Wed Sep 23 2026 Bob <bob@ipa.home.arpa> - 4.2.4-1
 - contest-ingest: a boundary marker before any QSO no longer ends a log. 893 files
   in the mirror -- 889 of them from 2020 -- put END-OF-LOG after the header block
