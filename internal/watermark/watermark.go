@@ -117,6 +117,27 @@ func InsertLogEntry(ctx context.Context, conn *ch.Client, db, filePath string, f
 // contest.parse_rejects. That is the point: after a run over 823,467 files you can
 // ask which files dropped anything, even where the samples were capped.
 func InsertLogEntryWithSkipped(ctx context.Context, conn *ch.Client, db, filePath string, fileSize, rowCount, skippedRows uint64, elapsedMs uint32) error {
+	return InsertLogEntries(ctx, conn, db, []LogEntry{{
+		FilePath: filePath, FileSize: fileSize, RowCount: rowCount, SkippedRows: skippedRows, ElapsedMs: elapsedMs,
+	}})
+}
+
+// LogEntry is one file's row in {db}.ingest_log, for InsertLogEntries.
+type LogEntry struct {
+	FilePath    string
+	FileSize    uint64
+	RowCount    uint64
+	SkippedRows uint64
+	ElapsedMs   uint32
+}
+
+// InsertLogEntries records many files in one INSERT, with skipped_rows (so, like
+// InsertLogEntryWithSkipped, contest only for now). One round trip per file was half
+// of what made a full contest reload latency-bound: 825K files, 825K watermark INSERTs.
+func InsertLogEntries(ctx context.Context, conn *ch.Client, db string, entries []LogEntry) error {
+	if len(entries) == 0 {
+		return nil
+	}
 	hostname, _ := os.Hostname()
 
 	colPath := new(proto.ColStr)
@@ -126,12 +147,14 @@ func InsertLogEntryWithSkipped(ctx context.Context, conn *ch.Client, db, filePat
 	colElapsed := new(proto.ColUInt32)
 	colHost := new(proto.ColStr).LowCardinality()
 
-	colPath.Append(filePath)
-	colSize.Append(fileSize)
-	colRows.Append(rowCount)
-	colSkip.Append(skippedRows)
-	colElapsed.Append(elapsedMs)
-	colHost.Append(hostname)
+	for _, e := range entries {
+		colPath.Append(e.FilePath)
+		colSize.Append(e.FileSize)
+		colRows.Append(e.RowCount)
+		colSkip.Append(e.SkippedRows)
+		colElapsed.Append(e.ElapsedMs)
+		colHost.Append(hostname)
+	}
 
 	query := fmt.Sprintf("INSERT INTO %s.ingest_log (file_path, file_size, row_count, skipped_rows, elapsed_ms, hostname) VALUES", db)
 	return conn.Do(ctx, ch.Query{

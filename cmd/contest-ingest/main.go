@@ -214,10 +214,6 @@ func (b *ContestBatch) Input() proto.Input {
 	}
 }
 
-var batchPool = sync.Pool{
-	New: func() interface{} { return NewContestBatch() },
-}
-
 // isCallsign checks if a string looks like an amateur radio callsign.
 // Must contain both a letter and a digit, be 3+ chars, and match the callsign pattern.
 // Also accepts callsigns with /suffix (e.g., HB9DAX/QRP, W1AW/4).
@@ -1008,7 +1004,7 @@ func flushQuarantine(ctx context.Context, conn *ch.Client, rows []*QSO, filePath
 	})
 }
 
-func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table string, batchSize int, enrich bool, stats *Stats, rejectWriter *RejectWriter) uint64 {
+func processFile(ctx context.Context, conn *ch.Client, path, srcDir string, pend *pendingBatch, enrich bool, stats *Stats, rejectWriter *RejectWriter) uint64 {
 	fileName := filepath.Base(path)
 	src := sourceKey(path, srcDir)
 	relPath := filepath.Join(src, fileName)
@@ -1056,12 +1052,6 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 		rejectWriter.Write(relPath, "0 QSOs parsed")
 		return 0
 	}
-
-	tableFQN := fmt.Sprintf("%s.%s", db, table)
-
-	batch := batchPool.Get().(*ContestBatch)
-	defer batchPool.Put(batch)
-	batch.Reset()
 
 	// The directory names the contest; the header only gets to disagree in the log.
 	// See the Contest label block above for why the header is not trusted here.
@@ -1114,12 +1104,14 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 		rejectWriter.Write(relPath, fmt.Sprintf("%d QSO(s) dated outside declared year %d", len(held), declaredYear))
 	}
 
-	// Pass 3: bronze.
+	// Pass 3: bronze -- appended to the worker's batch, not written here. The file
+	// goes in whole or not at all: the cancellation check is before the first row,
+	// never between rows, so a batch can not hold half a file.
+	if ctx.Err() != nil {
+		return 0
+	}
+	batch := pend.batch
 	for _, qso := range keep {
-		if ctx.Err() != nil {
-			return 0
-		}
-
 		batch.Timestamp.Append(qso.Timestamp)
 		batch.Frequency.Append(qso.Frequency)
 		batch.Band.Append(qso.Band)
@@ -1132,64 +1124,98 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 		batch.ExchRcvd.Append(qso.ExchRcvd)
 		batch.Contest.Append(contestID)
 		batch.Source.Append(src)
-
 		rowCount++
-
-		if batch.Len() >= batchSize {
-			if err := flushBatch(ctx, conn, tableFQN, batch); err != nil {
-				log.Printf("[%s] flush error: %v", relPath, err)
-			}
-			batch.Reset()
-		}
 	}
 
-	// Flush remainder
-	if batch.Len() > 0 {
-		if err := flushBatch(ctx, conn, tableFQN, batch); err != nil {
-			log.Printf("[%s] final flush error: %v", relPath, err)
-		}
-		batch.Reset()
-	}
+	// Parse time only: the INSERT that carries these rows happens later, for many files.
+	elapsedMs := uint32(time.Since(startTime).Milliseconds())
 
-	elapsed := time.Since(startTime)
-	elapsedMs := uint32(elapsed.Milliseconds())
-
-	// Get file size for watermark
 	fi, _ := os.Stat(path)
 	fileSize := uint64(0)
 	if fi != nil {
 		fileSize = uint64(fi.Size())
 	}
 
-	// Record in watermark
-	wmRelPath := relPathFrom(srcDir, path)
-	if err := watermark.InsertLogEntryWithSkipped(ctx, conn, db, wmRelPath, fileSize, rowCount, uint64(len(rejects)), elapsedMs); err != nil {
-		log.Printf("[%s] watermark insert error: %v", relPath, err)
-	}
-
-	stats.TotalRows.Add(rowCount)
-	stats.TotalFiles.Add(1)
+	pend.entries = append(pend.entries, watermark.LogEntry{
+		FilePath:    relPathFrom(srcDir, path),
+		FileSize:    fileSize,
+		RowCount:    rowCount,
+		SkippedRows: uint64(len(rejects)),
+		ElapsedMs:   elapsedMs,
+	})
+	pend.rows += rowCount
 
 	// Grid enrichment -- one entry per log section. A concatenated file used to
 	// enrich only its first station and drop the grids of every station after it.
 	if enrich {
-		var entries []GridEntry
 		for _, hdr := range sections {
 			if hdr.Grid == "" || hdr.Callsign == "" {
 				continue
 			}
-			entries = append(entries, GridEntry{Callsign: hdr.Callsign, Grid: hdr.Grid})
-		}
-		if len(entries) > 0 {
-			if err := flushGrids(ctx, conn, entries); err != nil {
-				log.Printf("[%s] grid enrich error: %v", relPath, err)
-			} else {
-				stats.GridsFound.Add(uint64(len(entries)))
-			}
+			pend.grids = append(pend.grids, GridEntry{Callsign: hdr.Callsign, Grid: hdr.Grid})
 		}
 	}
 
 	return rowCount
+}
+
+// pendingBatch is one worker's bronze batch plus the files whose rows are in it.
+//
+// THE BATCH SPANS FILES. It used to live inside processFile, so -batch (100,000)
+// could never fire: a contest log is a few hundred QSOs, and every file became its
+// own ~400-row INSERT plus its own watermark INSERT. A full reload was 825K files x
+// two round trips -- latency-bound, the machine idle (IONIS-AI/ionis-apps#22).
+//
+// A FILE IS WATERMARKED ONLY AFTER ITS ROWS ARE IN BRONZE. The old code logged a
+// failed bronze flush and watermarked the file anyway, so its rows were lost and an
+// incremental run would never retry them. Now a failed flush fails every file in the
+// batch, none is watermarked, and the next run picks them up.
+type pendingBatch struct {
+	batch   *ContestBatch
+	entries []watermark.LogEntry
+	grids   []GridEntry
+	rows    uint64
+}
+
+func (p *pendingBatch) reset() {
+	p.batch.Reset()
+	p.entries = p.entries[:0]
+	p.grids = p.grids[:0]
+	p.rows = 0
+}
+
+// commit writes the batch, then the watermark for every file in it, then any grids.
+func (p *pendingBatch) commit(ctx context.Context, conn *ch.Client, db, tableFQN string, stats *Stats, rejectWriter *RejectWriter) {
+	defer p.reset()
+	if len(p.entries) == 0 {
+		return
+	}
+
+	if p.batch.Len() > 0 {
+		if err := flushBatch(ctx, conn, tableFQN, p.batch); err != nil {
+			log.Printf("bronze insert FAILED for %d file(s), %d row(s): %v - none watermarked, retryable", len(p.entries), p.rows, err)
+			for _, e := range p.entries {
+				stats.FailedFiles.Add(1)
+				rejectWriter.Write(e.FilePath, fmt.Sprintf("bronze insert failed: %v", err))
+			}
+			return
+		}
+	}
+
+	if err := watermark.InsertLogEntries(ctx, conn, db, p.entries); err != nil {
+		log.Printf("watermark insert error for %d file(s): %v", len(p.entries), err)
+	}
+
+	stats.TotalRows.Add(p.rows)
+	stats.TotalFiles.Add(uint64(len(p.entries)))
+
+	if len(p.grids) > 0 {
+		if err := flushGrids(ctx, conn, p.grids); err != nil {
+			log.Printf("grid enrich error for %d file(s): %v", len(p.entries), err)
+		} else {
+			stats.GridsFound.Add(uint64(len(p.grids)))
+		}
+	}
 }
 
 // worker processes files from a channel using a persistent ClickHouse connection.
@@ -1207,11 +1233,20 @@ func worker(ctx context.Context, id int, files <-chan string, srcDir, host, db, 
 	}
 	defer conn.Close()
 
+	tableFQN := fmt.Sprintf("%s.%s", db, table)
+	pend := &pendingBatch{batch: NewContestBatch()}
+
 	for path := range files {
 		if ctx.Err() != nil {
-			return
+			return // pending files are unwatermarked, so the next run retries them
 		}
-		processFile(ctx, conn, path, srcDir, db, table, batchSize, enrich, stats, rejectWriter)
+		processFile(ctx, conn, path, srcDir, pend, enrich, stats, rejectWriter)
+		if pend.batch.Len() >= batchSize {
+			pend.commit(ctx, conn, db, tableFQN, stats, rejectWriter)
+		}
+	}
+	if ctx.Err() == nil {
+		pend.commit(ctx, conn, db, tableFQN, stats, rejectWriter)
 	}
 }
 
