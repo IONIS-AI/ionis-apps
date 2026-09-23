@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.3.1
+Version:        4.3.2
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -327,6 +327,12 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Wed Sep 23 2026 Bob <bob@ipa.home.arpa> - 4.3.2-1
+- solar-xray-download: a failed dated copy now fails the run. It was a WARN with exit 0,
+  so the unit succeeded while the only X-ray history stopped growing; xray-archive/ had
+  been created 0755 by a hand run and the service user could not write it (#34). The
+  archive directory is created 2775 (group-writable, setgid) and the dated file is
+  written beside its name and renamed, so a same-day copy by another account is replaced.
 * Wed Sep 23 2026 Bob <bob@ipa.home.arpa> - 4.3.1-1
 - solar: the per-source refresh timers (kp, sfi, ssn, xray) shipped in 4.1.x but were
   never enabled -- no preset was shipped, so %%systemd_post left them at the
