@@ -221,6 +221,18 @@ var batchPool = sync.Pool{
 // isCallsign checks if a string looks like an amateur radio callsign.
 // Must contain both a letter and a digit, be 3+ chars, and match the callsign pattern.
 // Also accepts callsigns with /suffix (e.g., HB9DAX/QRP, W1AW/4).
+// hasAlnum reports whether s contains at least one letter or digit. It is the whole
+// test applied to a logging station: anything else would be judging a callsign by a
+// pattern, and the patterns keep being wrong about real stations.
+func hasAlnum(s string) bool {
+	for _, r := range s {
+		if (r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
+			return true
+		}
+	}
+	return false
+}
+
 // baseCall returns the actual callsign inside a compound callsign, or "" if the
 // string holds none.
 //
@@ -334,9 +346,22 @@ func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
 	// The header is the fallback for the reverse case: a line whose own field is
 	// junk. Until now myCall was passed in and never read, so the header could only
 	// ever reject a QSO, never rescue one.
+	// THE LINE'S OWN CALLSIGN IS TAKEN AS WRITTEN. It is not held to callsignRe,
+	// because that regex demands a trailing letter and real callsigns do not always
+	// have one: LM1814 (Norwegian constitution bicentenary), SZ3PC20, 7Q1. Gating on
+	// it here rejected the WHOLE FILE for those stations -- 226 QSOs for LM1814, 110
+	// for SZ3PC20 -- which is the same mistake as refusing a QSO worked with 7Q1,
+	// made one field to the left.
+	//
+	// callsignRe exists to LOCATE the worked station among variable-width exchange
+	// fields. It is a locator, not a validator, and it has now twice been used as
+	// one. Bronze is a faithful ingest: f[4] is what the log says logged the QSO.
+	//
+	// The only refusal is a field with nothing callsign-like in it at all -- the
+	// "*************" template placeholder -- which is not a spelling of a station.
 	logCall := strings.ToUpper(f[4])
-	if baseCall(logCall) == "" {
-		if mc := strings.ToUpper(strings.TrimSpace(myCall)); baseCall(mc) != "" {
+	if !hasAlnum(logCall) {
+		if mc := strings.ToUpper(strings.TrimSpace(myCall)); hasAlnum(mc) {
 			logCall = mc
 		} else {
 			return nil, fmt.Errorf("no logging station: %q", f[4])
