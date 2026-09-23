@@ -271,19 +271,29 @@ func isCallsign(s string) bool {
 //
 // Their-call is found by scanning from index 6 for the next callsign that differs from my_call.
 func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
-	if len(fields) < 9 {
-		return nil, fmt.Errorf("too few fields: %d", len(fields))
+	// THE TAG IS NOT ALWAYS ITS OWN FIELD. Some logs write no space after the colon:
+	//
+	//	QSO:14080 RY 2020-02-08 0501  UR8EQ  599  111 RK0UT    599  098
+	//
+	// strings.Fields then yields "QSO:14080" as one token. Matching only the bare
+	// "QSO:" left the frequency glued to the tag, so every such line failed as a bad
+	// frequency and the QSO was dropped -- 266 of the 577 lines in ur8eq.log alone,
+	// and that file mixes both spellings, so it is not even consistent within itself.
+	//
+	// Split the tag off wherever it is, then apply the field-count check to what
+	// remains. Checking the count first would reject a line whose fields are all
+	// present but whose first two share a token.
+	f := fields
+	if len(f) > 0 && len(f[0]) >= 4 && strings.EqualFold(f[0][:4], "QSO:") {
+		if rest := f[0][4:]; rest != "" {
+			f = append([]string{rest}, f[1:]...)
+		} else {
+			f = f[1:]
+		}
 	}
 
-	// Strip "QSO:" prefix if present as field[0] (case-insensitive)
-	startIdx := 0
-	if strings.EqualFold(strings.TrimRight(fields[0], ":"), "QSO") {
-		startIdx = 1
-	}
-
-	f := fields[startIdx:]
 	if len(f) < 8 {
-		return nil, fmt.Errorf("too few fields after QSO: %d", len(f))
+		return nil, fmt.Errorf("too few fields: %d", len(f))
 	}
 
 	// f[0]=freq f[1]=mode f[2]=date f[3]=time f[4]=my_call f[5..]=rst+exch+their_call+...

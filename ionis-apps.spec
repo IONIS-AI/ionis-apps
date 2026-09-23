@@ -333,6 +333,10 @@ fi
   every QSO after it had no callsign and the whole file was lost. Written by N1MM,
   N3FJP, CTESTWIN and QARTest among others, so a publisher-side artifact of the
   2020 archives rather than a logger bug.
+- contest-ingest: the QSO: tag is split off wherever it sits. Logs that write no
+  space after the colon (QSO:14080) yielded one token, so the frequency stayed glued
+  to the tag and every such line failed as a bad frequency -- 266 of the 577 lines in
+  cq-wpx-rtty/2020/ur8eq.log, a file that mixes both spellings.
 - contest-ingest: parse rejects are now written even when a file fails entirely.
   The error paths returned before the reject write, so the files most worth
   diagnosing recorded nothing -- 'all 106 QSO lines failed to parse' and not one
