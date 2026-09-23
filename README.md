@@ -42,9 +42,11 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 
 | Command | Description |
 |---------|-------------|
-| `solar-ingest` | NOAA solar flux data ingestion |
-| `solar-backfill` | GFZ Potsdam historical SSN/SFI/Kp (2000-present) |
-| `solar-download` | NOAA/SIDC solar data downloader |
+| `solar-kp-download` / `solar-kp-ingest` | Kp/ap, GFZ definitive archive (1932-) → `solar.kp_bronze` |
+| `solar-sfi-download` / `solar-sfi-ingest` | F10.7, Penticton (2004-) → `solar.sfi_bronze` |
+| `solar-ssn-download` / `solar-ssn-ingest` | Sunspot number, SIDC (1818-) → `solar.ssn_bronze` |
+| `solar-xray-download` / `solar-xray-ingest` | GOES X-ray, SWPC 7-day → `solar.xray_bronze` |
+| `solar-download` | SWPC nowcast JSON, read by `solar-live-update` |
 
 ### Utility Tools
 
@@ -61,7 +63,7 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 | WSPR | 10.9B spots | `wspr-turbo` | 22.55 Mrps, 7m27s |
 | RBN | 2.26B spots | `rbn-ingest` | 10.32 Mrps, 3m32s |
 | Contest Logs | 234M QSOs | `contest-ingest` | 258K rps, 12m37s |
-| Solar Indices | 77K rows | `solar-backfill` | 2.88M rps |
+| Solar Kp | 277K rows | `solar-kp-ingest` | |
 | PSK Reporter | ~26M/day (live since Feb 2026) | `pskr-collector` | ~300 HF spots/sec |
 
 ## Idempotent Pipeline (v3.0.5+)
@@ -74,7 +76,7 @@ Every data source follows a paired **download → ingest** pattern. Downloaders 
 | RBN | `rbn-download` | `rbn-ingest` | `rbn.ingest_log` |
 | Contest | `contest-download` | `contest-ingest` | `contest.ingest_log` |
 | PSKR | `pskr-collector` | `pskr-ingest` | `pskr.ingest_log` |
-| Solar | `solar-download` | `solar-ingest` | — (ReplacingMergeTree dedup) |
+| Solar (per source) | `solar-{kp,sfi,ssn,xray}-download` | `solar-{kp,sfi,ssn,xray}-ingest` | — (run together by `solar-*-refresh.timer`) |
 
 ### Ingest Modes
 

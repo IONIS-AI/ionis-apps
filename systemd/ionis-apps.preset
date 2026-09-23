@@ -1,0 +1,23 @@
+# 90-ionis-apps.preset -- which ionis-apps units start enabled on a fresh install.
+#
+# Mirrors what the control node runs (verified 2026-09-23) plus the per-source solar refresh
+# timers, which shipped without one and so never ran. Anything not listed falls to the
+# distribution default, disable. wspr-download.timer is left out on purpose: the control
+# node does not run it.
+#
+# Presets apply on first install only. On an existing host run once:
+#   systemctl preset <unit>...   (or systemctl enable --now)
+
+enable dscovr-ingest.timer
+enable solar-live-update.timer
+enable solar-kp-refresh.timer
+enable solar-sfi-refresh.timer
+enable solar-ssn-refresh.timer
+enable solar-xray-refresh.timer
+enable wspr-live-download.timer
+enable wspr-live-ingest.timer
+enable wspr-turbo.timer
+enable rbn-download.timer
+enable rbn-ingest.timer
+enable pskr-ingest.timer
+enable pskr-collector.service

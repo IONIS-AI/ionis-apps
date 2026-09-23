@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.3.0
+Version:        4.3.1
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -79,11 +79,10 @@ Provides:       ki7mt-ai-lab-apps-solar = %{version}-%{release}
 
 %description solar
 Solar and geomagnetic data processing applications:
-- solar-download:     Multi-source solar data downloader (SIDC, NOAA, GOES)
-- solar-ingest:       Solar/geomagnetic data ingestion (SFI, SSN, Kp, Ap, X-ray)
-- solar-refresh:      Download + truncate + ingest pipeline script
-- solar-live-update:  Now-Casting live conditions updater (15-min cron)
-- solar-history-load: Historical solar data loader for training (6-hour cron)
+- solar-{kp,sfi,ssn,xray}-download/-ingest: one bronze table per source, each
+  from its definitive archive, run by the solar-*-refresh timers
+- solar-download:     SWPC nowcast JSON, the inputs of solar-live-update
+- solar-live-update:  Now-Casting live conditions updater (15-min timer)
 - dscovr-ingest:      DSCOVR L1 solar wind ingester (Bz, Bt, speed, density, temp)
 
 %package contest
@@ -140,6 +139,11 @@ install -d -m 0755 %{buildroot}%{_sysusersdir}
 install -p -m 0644 systemd/ionis-apps.sysusers %{buildroot}%{_sysusersdir}/ionis-apps.conf
 install -d -m 0755 %{buildroot}%{_tmpfilesdir}
 install -p -m 0644 systemd/ionis-apps.tmpfiles %{buildroot}%{_tmpfilesdir}/ionis-apps.conf
+# Which units start enabled. %%systemd_post consults presets, and with none shipped every
+# unit fell to the distribution default of disabled: the per-source solar refresh timers
+# were installed on 2026-09-22 and never ran (IONIS-AI/ionis-apps#34).
+install -d -m 0755 %{buildroot}%{_presetdir}
+install -p -m 0644 systemd/ionis-apps.preset %{buildroot}%{_presetdir}/90-ionis-apps.preset
 
 # The list the post scriptlet checks for shadowing, DERIVED from the same systemd/ directory the
 # install section reads below. The first was hand-maintained and had drifted before shipping — 14
@@ -160,8 +164,6 @@ install -p -m 0644 systemd/solar-xray-refresh.service %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/solar-xray-refresh.timer   %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-download.service       %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-download.timer         %{buildroot}%{_unitdir}/
-install -p -m 0644 systemd/solar-backfill.service      %{buildroot}%{_unitdir}/
-install -p -m 0644 systemd/solar-backfill.timer        %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-live-download.service %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-live-download.timer   %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-live-ingest.service   %{buildroot}%{_unitdir}/
@@ -172,8 +174,6 @@ install -p -m 0644 systemd/dscovr-ingest.service          %{buildroot}%{_unitdir
 install -p -m 0644 systemd/dscovr-ingest.timer            %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/solar-live-update.service      %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/solar-live-update.timer        %{buildroot}%{_unitdir}/
-install -p -m 0644 systemd/solar-history-load.service     %{buildroot}%{_unitdir}/
-install -p -m 0644 systemd/solar-history-load.timer       %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/rbn-download.service           %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/rbn-download.timer             %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/rbn-ingest.service             %{buildroot}%{_unitdir}/
@@ -186,6 +186,7 @@ install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir
 %config(noreplace) %{_sysconfdir}/%{name}/paths.conf
 %{_sysusersdir}/ionis-apps.conf
 %{_tmpfilesdir}/ionis-apps.conf
+%{_presetdir}/90-ionis-apps.preset
 %{_datadir}/%{name}/units.list
 %license COPYING
 %doc README.md
@@ -265,30 +266,30 @@ fi
 %{_unitdir}/solar-ssn-refresh.timer
 %{_unitdir}/solar-xray-refresh.service
 %{_unitdir}/solar-xray-refresh.timer
-%{_bindir}/solar-ingest
 %{_bindir}/solar-download
-%{_bindir}/solar-backfill
 %{_bindir}/dscovr-ingest
-%{_bindir}/solar-refresh
 %{_bindir}/solar-live-update
-%{_bindir}/solar-history-load
-%{_unitdir}/solar-backfill.service
-%{_unitdir}/solar-backfill.timer
 %{_unitdir}/dscovr-ingest.service
 %{_unitdir}/dscovr-ingest.timer
 %{_unitdir}/solar-live-update.service
 %{_unitdir}/solar-live-update.timer
-%{_unitdir}/solar-history-load.service
-%{_unitdir}/solar-history-load.timer
+
+# solar-backfill and solar-history-load wrote the retired solar.bronze and failed on every
+# run after it was dropped. Their files leave with this package; stop and disable them
+# first, while the unit files still exist, or the enable links are left dangling.
+%pre solar
+if [ $1 -gt 1 ]; then
+    systemctl --no-reload disable --now solar-backfill.timer solar-history-load.timer >/dev/null 2>&1 || :
+fi
 
 %post solar
-%systemd_post dscovr-ingest.timer solar-backfill.timer solar-live-update.timer solar-history-load.timer
+%systemd_post dscovr-ingest.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer solar-xray-refresh.timer
 
 %preun solar
-%systemd_preun dscovr-ingest.timer solar-backfill.timer solar-live-update.timer solar-history-load.timer
+%systemd_preun dscovr-ingest.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer solar-xray-refresh.timer
 
 %postun solar
-%systemd_postun_with_restart dscovr-ingest.timer solar-backfill.timer solar-live-update.timer solar-history-load.timer
+%systemd_postun_with_restart dscovr-ingest.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer solar-xray-refresh.timer
 
 %files contest
 %{_bindir}/contest-download
@@ -326,6 +327,15 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Wed Sep 23 2026 Bob <bob@ipa.home.arpa> - 4.3.1-1
+- solar: the per-source refresh timers (kp, sfi, ssn, xray) shipped in 4.1.x but were
+  never enabled -- no preset was shipped, so %%systemd_post left them at the
+  distribution default, disabled -- and kp/sfi bronze went stale from 2026-09-21.
+  Ship 90-ionis-apps.preset, and name the refresh timers in the solar scriptlets.
+- solar: retire solar-backfill, solar-history-load, solar-refresh and the old
+  solar-ingest. All four wrote the retired solar.bronze; the two timers failed on
+  every run after it was dropped, and solar-history-load kept recreating
+  solar._tmp_history_load. %%pre disables the old timers on upgrade (#34).
 * Wed Sep 23 2026 Bob <bob@ipa.home.arpa> - 4.3.0-1
 - contest-ingest: bronze gets every QSO: line, good, bad or otherwise (Judge: ingest
   is packaging). Each row carries file_path, line_no, declared_year, the raw line,

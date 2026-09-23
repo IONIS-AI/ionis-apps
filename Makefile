@@ -51,7 +51,7 @@ DISTDIR      := dist
 # Note: Legacy tools (wspr-ingest, wspr-ingest-cpu, wspr-ingest-fast) removed
 #       due to clickhouse-go/v2 API incompatibility. Replaced by faster tools.
 WSPR_CMDS    := wspr-shredder wspr-turbo wspr-parquet-native wspr-download wspr-backfill wspr-live-download wspr-live-ingest
-SOLAR_CMDS   := solar-ingest solar-download solar-backfill dscovr-ingest \
+SOLAR_CMDS   := solar-download dscovr-ingest \
                 solar-kp-download solar-kp-ingest \
                 solar-sfi-download solar-sfi-ingest \
                 solar-ssn-download solar-ssn-ingest \
@@ -62,7 +62,7 @@ UTIL_CMDS    := db-validate
 ALL_CMDS     := $(WSPR_CMDS) $(SOLAR_CMDS) $(CONTEST_CMDS) $(PSKR_CMDS) $(UTIL_CMDS)
 
 # Shell scripts to install
-SOLAR_SCRIPTS := solar-refresh.sh solar-live-update.sh solar-history-load.sh
+SOLAR_SCRIPTS := solar-live-update.sh
 
 # =============================================================================
 # Default Target
@@ -83,9 +83,8 @@ help:
 	@printf "  wspr-download        WSPR archive downloader\n"
 	@printf "\n"
 	@printf "Solar Tools:\n"
-	@printf "  solar-download       Multi-source solar data downloader\n"
-	@printf "  solar-ingest         Solar/geomagnetic data ingester\n"
-	@printf "  solar-refresh        Download + ingest pipeline script\n"
+	@printf "  solar-{kp,sfi,ssn,xray}-download / -ingest   one bronze table per source\n"
+	@printf "  solar-download       SWPC nowcast JSON for solar-live-update\n"
 	@printf "  dscovr-ingest        DSCOVR L1 solar wind ingester (Bz/speed/density)\n"
 	@printf "\n"
 	@printf "Contest Tools:\n"
