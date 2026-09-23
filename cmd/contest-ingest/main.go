@@ -271,19 +271,29 @@ func isCallsign(s string) bool {
 //
 // Their-call is found by scanning from index 6 for the next callsign that differs from my_call.
 func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
-	if len(fields) < 9 {
-		return nil, fmt.Errorf("too few fields: %d", len(fields))
+	// THE TAG IS NOT ALWAYS ITS OWN FIELD. Some logs write no space after the colon:
+	//
+	//	QSO:14080 RY 2020-02-08 0501  UR8EQ  599  111 RK0UT    599  098
+	//
+	// strings.Fields then yields "QSO:14080" as one token. Matching only the bare
+	// "QSO:" left the frequency glued to the tag, so every such line failed as a bad
+	// frequency and the QSO was dropped -- 266 of the 577 lines in ur8eq.log alone,
+	// and that file mixes both spellings, so it is not even consistent within itself.
+	//
+	// Split the tag off wherever it is, then apply the field-count check to what
+	// remains. Checking the count first would reject a line whose fields are all
+	// present but whose first two share a token.
+	f := fields
+	if len(f) > 0 && len(f[0]) >= 4 && strings.EqualFold(f[0][:4], "QSO:") {
+		if rest := f[0][4:]; rest != "" {
+			f = append([]string{rest}, f[1:]...)
+		} else {
+			f = f[1:]
+		}
 	}
 
-	// Strip "QSO:" prefix if present as field[0] (case-insensitive)
-	startIdx := 0
-	if strings.EqualFold(strings.TrimRight(fields[0], ":"), "QSO") {
-		startIdx = 1
-	}
-
-	f := fields[startIdx:]
 	if len(f) < 8 {
-		return nil, fmt.Errorf("too few fields after QSO: %d", len(f))
+		return nil, fmt.Errorf("too few fields: %d", len(f))
 	}
 
 	// f[0]=freq f[1]=mode f[2]=date f[3]=time f[4]=my_call f[5..]=rst+exch+their_call+...
@@ -316,7 +326,22 @@ func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
 		}
 	}
 
+	// THE LINE CARRIES THE LOGGING STATION, NOT THE HEADER. Cabrillo puts the sent
+	// callsign in the QSO line itself, so a file with no CALLSIGN: header is still
+	// fully attributable -- 253 files in the mirror have no such header and 107,793
+	// of their 107,794 QSO lines name their station here.
+	//
+	// The header is the fallback for the reverse case: a line whose own field is
+	// junk. Until now myCall was passed in and never read, so the header could only
+	// ever reject a QSO, never rescue one.
 	logCall := strings.ToUpper(f[4])
+	if baseCall(logCall) == "" {
+		if mc := strings.ToUpper(strings.TrimSpace(myCall)); baseCall(mc) != "" {
+			logCall = mc
+		} else {
+			return nil, fmt.Errorf("no logging station: %q", f[4])
+		}
+	}
 
 	// Band: freq is kHz, GetBand expects MHz
 	bandID, _ := bands.GetBand(float64(freqKHz) / 1000.0)
@@ -480,12 +505,43 @@ func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*Q
 	// A section counts as real only once it carries something; that keeps a trailing
 	// END-OF-LOG, or a publisher footer after the last log, from becoming a phantom.
 	seen := false
+	// Whether this section has produced a QSO yet. A boundary marker only ENDS a log
+	// that actually contained QSOs -- see closeSection.
+	sectionHasQSO := false
 	closeSection := func() {
+		// A MARKER BEFORE ANY QSO DOES NOT END A LOG, IT IS MISPLACED.
+		//
+		// 889 files in the mirror, all from 2020, put END-OF-LOG after the header
+		// block and before the first QSO line:
+		//
+		//	START-OF-LOG: 3.0
+		//	CALLSIGN: W7GF
+		//	...
+		//	END-OF-LOG:          <- here
+		//	QSO: 14000 CW ...
+		//
+		// Taking that at face value resets the headers, so every QSO after it has no
+		// callsign to attribute and the whole file is lost -- 106 QSOs for W7GF, 817
+		// for WR2G, and so on across 893 files.
+		//
+		// It is not a logger bug: those files were written by N1MM, N3FJP, CTESTWIN
+		// and QARTest among others, and eight vendors do not independently move a
+		// terminator. 889 of 893 are from 2020 alone, which makes it a publisher-side
+		// artifact of that year's archives -- the same class as the 2017 logs
+		// republished under 2018 that contest.quarantine exists for.
+		//
+		// So a boundary closes a log only once that log has produced a QSO. A marker
+		// arriving before any QSO is treated as part of the header block and the
+		// headers are kept.
+		if !sectionHasQSO {
+			return
+		}
 		if seen {
 			sections = append(sections, headers)
 		}
 		headers = &CabrilloHeaders{}
 		seen = false
+		sectionHasQSO = false
 	}
 
 	scanner := bufio.NewScanner(file)
@@ -541,19 +597,13 @@ func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*Q
 			if myCallOverride != "" {
 				myCall = myCallOverride
 			}
-			if myCall == "" {
-				// A QSO line before any CALLSIGN: header -- the section does not
-				// say who logged it, so the QSO cannot be attributed.
-				reject("no CALLSIGN header", "QSO line appears before any CALLSIGN: header in its log section", trimmed)
-				continue
-			}
-
 			qso, err := parseQSOLine(fields, myCall, contestID)
 			if err != nil {
 				reject(rejectReason(err), err.Error(), trimmed)
 				continue
 			}
 			seen = true
+			sectionHasQSO = true
 			qsos = append(qsos, qso)
 		}
 	}
@@ -952,6 +1002,23 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	if len(rejects) > 0 {
 		stats.SkippedRows.Add(uint64(len(rejects)))
 	}
+
+	// RECORD THE REJECTS EVEN WHEN THE FILE FAILS ENTIRELY -- especially then.
+	//
+	// parseFile returns an error when NOTHING parsed, and the error paths below
+	// return early, so the files most worth diagnosing were the ones writing nothing
+	// to contest.parse_rejects. That is exactly backwards: "all 106 QSO lines failed
+	// to parse" tells you a file died and not one thing about why, which is how the
+	// misplaced-END-OF-LOG defect had to be diagnosed by hand from the archive.
+	//
+	// Done before the error checks so every path is covered, and never fatal: a
+	// diagnostic must not be the reason a file is reported differently.
+	if rejectTable != "" && len(rejects) > 0 {
+		if e := flushParseRejects(ctx, conn, rejectTable, rejects, relPath, contestID, hostName); e != nil {
+			log.Printf("[%s] parse-reject insert error: %v", relPath, e)
+		}
+	}
+
 	if err != nil {
 		log.Printf("[%s] parse error: %v", relPath, err)
 		stats.FailedFiles.Add(1)
@@ -1073,15 +1140,6 @@ func processFile(ctx context.Context, conn *ch.Client, path, srcDir, db, table s
 	wmRelPath := relPathFrom(srcDir, path)
 	if err := watermark.InsertLogEntryWithSkipped(ctx, conn, db, wmRelPath, fileSize, rowCount, uint64(len(rejects)), elapsedMs); err != nil {
 		log.Printf("[%s] watermark insert error: %v", relPath, err)
-	}
-
-	// Record the lines the parser could not read. AFTER the data insert on purpose:
-	// a reject is a diagnostic, and a diagnostic must never be the reason a good
-	// file fails to land. If this write fails the QSOs are already in.
-	if rejectTable != "" && len(rejects) > 0 {
-		if err := flushParseRejects(ctx, conn, rejectTable, rejects, relPath, contestID, hostName); err != nil {
-			log.Printf("[%s] parse-reject insert error: %v", relPath, err)
-		}
 	}
 
 	stats.TotalRows.Add(rowCount)

@@ -150,26 +150,64 @@ func TestSkippedLinesAreRecordedWithReason(t *testing.T) {
 	}
 }
 
-// A QSO line before any CALLSIGN: header cannot be attributed, and that reason must
-// say so rather than arriving as a bare count.
-func TestUnattributableLineSaysWhy(t *testing.T) {
-	body := "START-OF-LOG: 3.0\nCONTEST: IARU-HF\n" +
-		"QSO: 14025 CW 2024-07-13 1200 K1ABC 599 14 ON9TT 599 28\n" +
-		"CALLSIGN: K1ABC\n" +
-		"QSO: 14025 CW 2024-07-13 1201 K1ABC 599 14 DL1ABC 599 28\n"
+// A file with no CALLSIGN: header at all is still fully attributable -- Cabrillo puts
+// the sent callsign in the QSO line itself. 253 files in the mirror have no such
+// header, and 107,793 of their 107,794 QSO lines name their station in the line.
+//
+// This test previously asserted the opposite, because the parser did: myCall was
+// passed to parseQSOLine and never read, so a missing header could only reject a QSO,
+// never rescue one. The test was encoding the defect.
+func TestNoCallsignHeaderStillAttributesFromTheLine(t *testing.T) {
+	body := "START-OF-LOG: 2.0\n" +
+		"CONTEST: CQ-WW-CW\n" +
+		"CLAIMED-SCORE: 3673042\n" + // no CALLSIGN: anywhere
+		"QSO:  7022 CW 2009-11-28 0000 S50R 599 15 YL2KO 599 15\n" +
+		"QSO:  7022 CW 2009-11-28 0001 S50R 599 15 US0HZ 599 16\n"
 
-	_, qsos, rejects, err := parseFile(writeTemp(t, body), "", "IARU-HF")
+	_, qsos, rejects, err := parseFile(writeTemp(t, body), "", "CQ-WW-CW")
 	if err != nil {
 		t.Fatalf("parseFile: %v", err)
 	}
-	if len(qsos) != 1 {
-		t.Errorf("parsed %d QSOs, want 1", len(qsos))
+	if len(qsos) != 2 {
+		t.Fatalf("parsed %d QSOs, want 2 -- the line names the station even with no header", len(qsos))
 	}
-	if len(rejects) != 1 {
-		t.Fatalf("recorded %d rejects, want 1", len(rejects))
+	if len(rejects) != 0 {
+		t.Errorf("got %d rejects, want 0: %+v", len(rejects), rejects)
 	}
-	if !strings.Contains(rejects[0].Reason, "CALLSIGN") {
-		t.Errorf("reason = %q, want it to name the missing CALLSIGN header", rejects[0].Reason)
+	for _, q := range qsos {
+		if q.Call1 != "S50R" {
+			t.Errorf("Call1 = %q, want S50R from the QSO line", q.Call1)
+		}
+	}
+}
+
+// The header is the FALLBACK for the reverse case: a line whose own callsign field is
+// junk. One line in the mirror has "*************" there -- a template placeholder.
+func TestHeaderRescuesALineWithNoCallsignOfItsOwn(t *testing.T) {
+	// With a header, the junk line is rescued and attributed to it.
+	withHdr := "START-OF-LOG: 3.0\nCALLSIGN: K1ABC\nCONTEST: IARU-HF\n" +
+		"QSO: 14025 CW 2024-07-13 1200 ************* 599 14 ON9TT 599 28\n"
+	_, qsos, rejects, err := parseFile(writeTemp(t, withHdr), "", "IARU-HF")
+	if err != nil {
+		t.Fatalf("with header: %v", err)
+	}
+	if len(qsos) != 1 || len(rejects) != 0 {
+		t.Fatalf("with header: %d QSOs, %d rejects; want 1 and 0", len(qsos), len(rejects))
+	}
+	if qsos[0].Call1 != "K1ABC" {
+		t.Errorf("Call1 = %q, want K1ABC from the header", qsos[0].Call1)
+	}
+
+	// Without one, there is nothing to attribute it to and it is refused by name.
+	noHdr := "START-OF-LOG: 3.0\nCONTEST: IARU-HF\n" +
+		"QSO: 14025 CW 2024-07-13 1200 ************* 599 14 ON9TT 599 28\n"
+	_, qsos2, rejects2, _ := parseFile(writeTemp(t, noHdr), "", "IARU-HF")
+	if len(qsos2) != 0 {
+		t.Errorf("without header: parsed %d QSOs, want 0", len(qsos2))
+	}
+	if len(rejects2) != 1 || !strings.Contains(rejects2[0].Reason, "worked station") &&
+		!strings.Contains(rejects2[0].Detail, "logging station") {
+		t.Errorf("without header: rejects = %+v; want one naming the missing logging station", rejects2)
 	}
 }
 
@@ -200,5 +238,62 @@ func TestRejectReasonIsABoundedCategory(t *testing.T) {
 	b := rejectReason(errors.New(`bad freq "bbb": y`))
 	if a != b {
 		t.Errorf("distinct bad values produced distinct reasons (%q vs %q); LowCardinality would blow up", a, b)
+	}
+}
+
+// 889 files in the mirror, all from 2020, put END-OF-LOG after the header block and
+// BEFORE the first QSO line. Taking that at face value resets the headers, so every
+// QSO after it has no callsign to attribute and the entire file is lost.
+//
+// Not a logger bug -- those files came from N1MM, N3FJP, CTESTWIN and QARTest among
+// others, and eight vendors do not independently move a terminator. It is a
+// publisher-side artifact of the 2020 archives.
+func TestMisplacedEndOfLogBeforeQSOs(t *testing.T) {
+	body := "START-OF-LOG: 3.0\n" +
+		"CONTEST: ARRL-DX-CW\n" +
+		"LOCATION: OR\n" +
+		"CALLSIGN: W7GF\n" +
+		"CATEGORY-POWER: LOW\n" +
+		"END-OF-LOG:\n" + // misplaced: before the QSOs
+		"QSO: 14000 CW 2020-02-15 0004 W7GF 599 OR JH3AIU 599 KW\n" +
+		"QSO: 14000 CW 2020-02-15 0006 W7GF 599 OR HQ9X 599 99\n"
+
+	_, qsos, rejects, err := parseFile(writeTemp(t, body), "", "ARRL-DX-CW")
+	if err != nil {
+		t.Fatalf("parseFile: %v -- a misplaced END-OF-LOG must not lose the file", err)
+	}
+	if len(qsos) != 2 {
+		t.Fatalf("parsed %d QSOs, want 2 (the headers were reset by a marker that ends nothing)", len(qsos))
+	}
+	if len(rejects) != 0 {
+		t.Errorf("got %d rejects, want 0: %+v", len(rejects), rejects)
+	}
+	for _, q := range qsos {
+		if q.Call1 != "W7GF" {
+			t.Errorf("Call1 = %q, want W7GF -- attribution was lost at the misplaced marker", q.Call1)
+		}
+	}
+}
+
+// The tolerance above must not cost the concatenation fix: a marker that follows real
+// QSOs still ends that log, so a genuinely bundled file still splits per station.
+func TestRealBoundaryStillSplitsAfterTolerance(t *testing.T) {
+	body := oneLog("R0HQ", "NO14", []string{"14025", "21025"}) +
+		oneLog("DA0HQ", "JO50", []string{"7025"})
+
+	_, qsos, _, err := parseFile(writeTemp(t, body), "", "IARU-HF")
+	if err != nil {
+		t.Fatalf("parseFile: %v", err)
+	}
+	if len(qsos) != 3 {
+		t.Fatalf("parsed %d QSOs, want 3", len(qsos))
+	}
+	counts := map[string]int{}
+	for _, q := range qsos {
+		counts[q.Call1]++
+	}
+	if counts["R0HQ"] != 2 || counts["DA0HQ"] != 1 {
+		t.Errorf("attribution R0HQ=%d DA0HQ=%d, want 2 and 1 -- tolerating a misplaced marker must not stop real boundaries splitting",
+			counts["R0HQ"], counts["DA0HQ"])
 	}
 }

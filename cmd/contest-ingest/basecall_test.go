@@ -178,3 +178,40 @@ func TestSweepstakesTemplateNotGenericTemplate(t *testing.T) {
 		t.Errorf("Call2 = %q, want 7Q1", q.Call2)
 	}
 }
+
+// Some logs write no space after the tag -- QSO:14080 -- so strings.Fields yields
+// "QSO:14080" as a single token. Matching only the bare "QSO:" left the frequency
+// glued to the tag and the line failed as a bad frequency, dropping the QSO. 266 of
+// the 577 lines in cq-wpx-rtty/2020/ur8eq.log, which mixes both spellings.
+func TestQSOTagWithNoFollowingSpace(t *testing.T) {
+	spaced := []string{"QSO:", "14080", "RY", "2020-02-08", "0501", "UR8EQ", "599", "111", "RK0UT", "599", "098"}
+	glued := []string{"QSO:14080", "RY", "2020-02-08", "0501", "UR8EQ", "599", "111", "RK0UT", "599", "098"}
+
+	a, err := parseQSOLine(spaced, "UR8EQ", "CQ-WPX-RTTY")
+	if err != nil {
+		t.Fatalf("spaced form: %v", err)
+	}
+	b, err := parseQSOLine(glued, "UR8EQ", "CQ-WPX-RTTY")
+	if err != nil {
+		t.Fatalf("glued form: %v -- the frequency is still attached to the tag", err)
+	}
+
+	// Both spellings must produce the same QSO; a file may mix them line to line.
+	if a.Frequency != b.Frequency || a.Call1 != b.Call1 || a.Call2 != b.Call2 || !a.Timestamp.Equal(b.Timestamp) {
+		t.Errorf("spelling changed the QSO:\n  spaced %+v\n  glued  %+v", a, b)
+	}
+	if b.Frequency != 14080 {
+		t.Errorf("frequency = %d, want 14080", b.Frequency)
+	}
+	if b.Call2 != "RK0UT" {
+		t.Errorf("Call2 = %q, want RK0UT", b.Call2)
+	}
+}
+
+// Splitting the tag must not let a genuinely short line through: the field count is
+// checked on what remains after the split, not before it.
+func TestShortLineStillRejectedAfterTagSplit(t *testing.T) {
+	if _, err := parseQSOLine([]string{"QSO:14080", "RY", "2020-02-08"}, "UR8EQ", "CQ-WPX-RTTY"); err == nil {
+		t.Error("a 3-field line was accepted; the count check must apply after the tag is split off")
+	}
+}

@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.2.3
+Version:        4.2.4
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -326,6 +326,28 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Wed Sep 23 2026 Bob <bob@ipa.home.arpa> - 4.2.4-1
+- contest-ingest: a boundary marker before any QSO no longer ends a log. 893 files
+  in the mirror -- 889 of them from 2020 -- put END-OF-LOG after the header block
+  and before the first QSO line. Closing the section there reset the headers, so
+  every QSO after it had no callsign and the whole file was lost. Written by N1MM,
+  N3FJP, CTESTWIN and QARTest among others, so a publisher-side artifact of the
+  2020 archives rather than a logger bug.
+- contest-ingest: the QSO: tag is split off wherever it sits. Logs that write no
+  space after the colon (QSO:14080) yielded one token, so the frequency stayed glued
+  to the tag and every such line failed as a bad frequency -- 266 of the 577 lines in
+  cq-wpx-rtty/2020/ur8eq.log, a file that mixes both spellings.
+- contest-ingest: a missing CALLSIGN: header no longer rejects a QSO. Cabrillo puts the
+  sent callsign in the QSO line itself, and myCall was passed to parseQSOLine and never
+  read -- so the header could only ever reject a QSO, never rescue one. 253 files in the
+  mirror have no CALLSIGN header at all and 107,793 of their 107,794 QSO lines name
+  their station in the line. The header is now the fallback for the reverse case, a
+  line whose own callsign field is junk.
+- contest-ingest: parse rejects are now written even when a file fails entirely.
+  The error paths returned before the reject write, so the files most worth
+  diagnosing recorded nothing -- 'all 106 QSO lines failed to parse' and not one
+  word about why.
+
 * Tue Sep 22 2026 Bob <bob@ipa.home.arpa> - 4.2.3-1
 - contest-ingest: a skipped QSO line is now RECORDED, not just counted. parseFile
   returns []ParseReject (line number, category, full parser error, raw line) and
