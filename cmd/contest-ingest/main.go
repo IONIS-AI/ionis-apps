@@ -326,7 +326,22 @@ func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
 		}
 	}
 
+	// THE LINE CARRIES THE LOGGING STATION, NOT THE HEADER. Cabrillo puts the sent
+	// callsign in the QSO line itself, so a file with no CALLSIGN: header is still
+	// fully attributable -- 253 files in the mirror have no such header and 107,793
+	// of their 107,794 QSO lines name their station here.
+	//
+	// The header is the fallback for the reverse case: a line whose own field is
+	// junk. Until now myCall was passed in and never read, so the header could only
+	// ever reject a QSO, never rescue one.
 	logCall := strings.ToUpper(f[4])
+	if baseCall(logCall) == "" {
+		if mc := strings.ToUpper(strings.TrimSpace(myCall)); baseCall(mc) != "" {
+			logCall = mc
+		} else {
+			return nil, fmt.Errorf("no logging station: %q", f[4])
+		}
+	}
 
 	// Band: freq is kHz, GetBand expects MHz
 	bandID, _ := bands.GetBand(float64(freqKHz) / 1000.0)
@@ -582,13 +597,6 @@ func parseFile(path, myCallOverride, contestID string) ([]*CabrilloHeaders, []*Q
 			if myCallOverride != "" {
 				myCall = myCallOverride
 			}
-			if myCall == "" {
-				// A QSO line before any CALLSIGN: header -- the section does not
-				// say who logged it, so the QSO cannot be attributed.
-				reject("no CALLSIGN header", "QSO line appears before any CALLSIGN: header in its log section", trimmed)
-				continue
-			}
-
 			qso, err := parseQSOLine(fields, myCall, contestID)
 			if err != nil {
 				reject(rejectReason(err), err.Error(), trimmed)
