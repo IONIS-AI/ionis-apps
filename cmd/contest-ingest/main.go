@@ -275,6 +275,19 @@ func isCallsign(s string) bool {
 	return baseCall(s) != ""
 }
 
+// cabrilloBandKHz maps the Cabrillo 3.0 band designators allowed in the QSO frequency
+// field above 1 GHz to the band's lower edge in kHz. A log may give the band instead
+// of a frequency there; `2.3G` is legal Cabrillo, not a malformed number. LIGHT has no
+// frequency to store and is left to fail.
+var cabrilloBandKHz = map[string]uint64{
+	"1.2G": 1_240_000, "2.3G": 2_300_000, "3.4G": 3_300_000, "5.7G": 5_650_000,
+	"10G": 10_000_000, "24G": 24_000_000, "47G": 47_000_000, "75G": 75_500_000,
+	"122G": 122_250_000, "134G": 134_000_000, "241G": 241_000_000,
+}
+
+// gluedFreqModeRe matches a frequency with its Cabrillo mode glued on: 21170CW, 14000PH.
+var gluedFreqModeRe = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?)(CW|PH|FM|RY|DG)$`)
+
 // parseQSOLine extracts fields from a Cabrillo QSO line.
 // Universal fields (same position in all Cabrillo formats):
 //
@@ -304,17 +317,30 @@ func parseQSOLine(fields []string, myCall, contestID string) (*QSO, error) {
 		}
 	}
 
+	// THE MODE IS NOT ALWAYS ITS OWN FIELD EITHER. `QSO: 21170CW 2005-...` -- the
+	// same missing space as the glued QSO: tag above, one field later. Split only on a
+	// Cabrillo mode, so `3500P` (a typo, not a mode) still fails as a bad frequency.
+	if len(f) > 0 {
+		if m := gluedFreqModeRe.FindStringSubmatch(f[0]); m != nil {
+			f = append([]string{m[1], m[2]}, f[1:]...)
+		}
+	}
+
 	if len(f) < 8 {
 		return nil, fmt.Errorf("too few fields: %d", len(f))
 	}
 
 	// f[0]=freq f[1]=mode f[2]=date f[3]=time f[4]=my_call f[5..]=rst+exch+their_call+...
-	// Frequency may be integer (7000) or decimal (1868.79) depending on logging software
-	freqFloat, err := strconv.ParseFloat(f[0], 64)
-	if err != nil {
-		return nil, fmt.Errorf("bad freq %q: %w", f[0], err)
+	// Frequency may be integer (7000) or decimal (1868.79) depending on logging software,
+	// or, above 1 GHz, a Cabrillo band designator (2.3G) rather than a frequency.
+	freqKHz, ok := cabrilloBandKHz[strings.ToUpper(f[0])]
+	if !ok {
+		freqFloat, err := strconv.ParseFloat(f[0], 64)
+		if err != nil {
+			return nil, fmt.Errorf("bad freq %q: %w", f[0], err)
+		}
+		freqKHz = uint64(freqFloat)
 	}
-	freqKHz := uint64(freqFloat)
 
 	mode := strings.ToUpper(f[1])
 
