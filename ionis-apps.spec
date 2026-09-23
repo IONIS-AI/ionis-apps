@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.2.5
+Version:        4.3.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -326,6 +326,18 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Wed Sep 23 2026 Bob <bob@ipa.home.arpa> - 4.3.0-1
+- contest-ingest: bronze gets every QSO: line, good, bad or otherwise (Judge: ingest
+  is packaging). Each row carries file_path, line_no, declared_year, the raw line,
+  the named patches applied to read it, and parse_error when it could not be read.
+  Off-year QSOs are tagged, not quarantined. Requires ionis-core >= 4.1.0.
+- contest-ingest: --quarantine-table, --reject-table and --no-quarantine removed.
+- contest-ingest: the batch spans files, one per worker, so -batch finally applies.
+  A full reload went from ~90 minutes to under a minute (#22).
+- contest-ingest: a file is watermarked only after its rows are in bronze. A failed
+  bronze insert used to be logged and the file watermarked anyway, losing its rows.
+- contest-ingest: Cabrillo band designators (2.3G) and a mode glued to the frequency
+  (21170CW) are read, not rejected.
 * Wed Sep 23 2026 Bob <bob@ipa.home.arpa> - 4.2.5-1
 - contest-ingest: the logging station is no longer held to callsignRe. That regex
   demands a trailing letter and real callsigns do not always have one -- LM1814,
