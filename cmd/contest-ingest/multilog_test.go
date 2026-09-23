@@ -202,3 +202,60 @@ func TestRejectReasonIsABoundedCategory(t *testing.T) {
 		t.Errorf("distinct bad values produced distinct reasons (%q vs %q); LowCardinality would blow up", a, b)
 	}
 }
+
+// 889 files in the mirror, all from 2020, put END-OF-LOG after the header block and
+// BEFORE the first QSO line. Taking that at face value resets the headers, so every
+// QSO after it has no callsign to attribute and the entire file is lost.
+//
+// Not a logger bug -- those files came from N1MM, N3FJP, CTESTWIN and QARTest among
+// others, and eight vendors do not independently move a terminator. It is a
+// publisher-side artifact of the 2020 archives.
+func TestMisplacedEndOfLogBeforeQSOs(t *testing.T) {
+	body := "START-OF-LOG: 3.0\n" +
+		"CONTEST: ARRL-DX-CW\n" +
+		"LOCATION: OR\n" +
+		"CALLSIGN: W7GF\n" +
+		"CATEGORY-POWER: LOW\n" +
+		"END-OF-LOG:\n" + // misplaced: before the QSOs
+		"QSO: 14000 CW 2020-02-15 0004 W7GF 599 OR JH3AIU 599 KW\n" +
+		"QSO: 14000 CW 2020-02-15 0006 W7GF 599 OR HQ9X 599 99\n"
+
+	_, qsos, rejects, err := parseFile(writeTemp(t, body), "", "ARRL-DX-CW")
+	if err != nil {
+		t.Fatalf("parseFile: %v -- a misplaced END-OF-LOG must not lose the file", err)
+	}
+	if len(qsos) != 2 {
+		t.Fatalf("parsed %d QSOs, want 2 (the headers were reset by a marker that ends nothing)", len(qsos))
+	}
+	if len(rejects) != 0 {
+		t.Errorf("got %d rejects, want 0: %+v", len(rejects), rejects)
+	}
+	for _, q := range qsos {
+		if q.Call1 != "W7GF" {
+			t.Errorf("Call1 = %q, want W7GF -- attribution was lost at the misplaced marker", q.Call1)
+		}
+	}
+}
+
+// The tolerance above must not cost the concatenation fix: a marker that follows real
+// QSOs still ends that log, so a genuinely bundled file still splits per station.
+func TestRealBoundaryStillSplitsAfterTolerance(t *testing.T) {
+	body := oneLog("R0HQ", "NO14", []string{"14025", "21025"}) +
+		oneLog("DA0HQ", "JO50", []string{"7025"})
+
+	_, qsos, _, err := parseFile(writeTemp(t, body), "", "IARU-HF")
+	if err != nil {
+		t.Fatalf("parseFile: %v", err)
+	}
+	if len(qsos) != 3 {
+		t.Fatalf("parsed %d QSOs, want 3", len(qsos))
+	}
+	counts := map[string]int{}
+	for _, q := range qsos {
+		counts[q.Call1]++
+	}
+	if counts["R0HQ"] != 2 || counts["DA0HQ"] != 1 {
+		t.Errorf("attribution R0HQ=%d DA0HQ=%d, want 2 and 1 -- tolerating a misplaced marker must not stop real boundaries splitting",
+			counts["R0HQ"], counts["DA0HQ"])
+	}
+}
