@@ -212,19 +212,41 @@ func fetch(c *http.Client, base string, o object, dst string) error {
 	return os.Rename(tmp, dst)
 }
 
+// get fetches u, retrying a server error (5xx) or a transport error up to four times
+// with backoff. NCEI's proxy returns an occasional HTTP 500 for a file that is fine a
+// moment later: one of 7,289 on the first full mirror (2026-09-24).
 func get(c *http.Client, u string) ([]byte, error) {
+	var last error
+	for attempt, wait := 0, 2*time.Second; attempt < 5; attempt, wait = attempt+1, wait*2 {
+		if attempt > 0 {
+			time.Sleep(wait)
+		}
+		b, retry, err := getOnce(c, u)
+		if err == nil {
+			return b, nil
+		}
+		last = err
+		if !retry {
+			break
+		}
+	}
+	return nil, last
+}
+
+func getOnce(c *http.Client, u string) ([]byte, bool, error) {
 	req, err := http.NewRequest("GET", u, nil)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	req.Header.Set("User-Agent", userAgent)
 	resp, err := c.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, resp.StatusCode >= 500, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
+	return b, err != nil, err
 }

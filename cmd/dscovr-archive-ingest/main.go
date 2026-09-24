@@ -60,6 +60,15 @@ var products = map[string]product{
 		int8s: []string{"measurement_mode", "measurement_range"}},
 }
 
+// flagsByName are flag variables whose names do not end in _flag. Stored in the flags
+// map under the name the file uses, like every other flag.
+//
+//	large_flow_angles  0/1, "flow angles exceed expected range", in plasma files from
+//	                   2016-12-14 to 2017-04-12; renamed large_flow_angle_flag after.
+//	                   Found by the unknown-variable guard on the first full load: 134
+//	                   files refused until it was named here.
+var flagsByName = map[string]bool{"large_flow_angles": true}
+
 // batch is the columnar insert for one product, spanning files.
 type batch struct {
 	p       product
@@ -139,7 +148,7 @@ func (b *batch) addFile(f *netcdf3.File, rel string) error {
 	for _, v := range f.Vars {
 		switch {
 		case known[v.Name]:
-		case strings.HasSuffix(v.Name, "_flag"):
+		case strings.HasSuffix(v.Name, "_flag") || flagsByName[v.Name]:
 			flagNames = append(flagNames, v.Name)
 		default:
 			return fmt.Errorf("unknown variable %q: NOAA changed the product; update the table and this ingester before loading", v.Name)
