@@ -9,6 +9,7 @@
 #   systemctl preset <unit>...   (or systemctl enable --now)
 
 enable dscovr-ingest.timer
+enable dscovr-archive-refresh.timer
 enable solar-live-update.timer
 enable solar-kp-refresh.timer
 enable solar-sfi-refresh.timer

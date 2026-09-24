@@ -1,0 +1,12 @@
+[Unit]
+Description=DSCOVR definitive archive from NOAA NCEI (2016-07-26-, ~3 months behind)
+
+[Timer]
+# Daily is ample: NCEI publishes day files about three months late, and a missed run
+# loses nothing -- the next one fetches whatever is new.
+OnCalendar=04:10
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target
