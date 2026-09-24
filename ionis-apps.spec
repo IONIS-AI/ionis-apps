@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.3.2
+Version:        4.4.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -83,7 +83,9 @@ Solar and geomagnetic data processing applications:
   from its definitive archive, run by the solar-*-refresh timers
 - solar-download:     SWPC nowcast JSON, the inputs of solar-live-update
 - solar-live-update:  Now-Casting live conditions updater (15-min timer)
-- dscovr-ingest:      DSCOVR L1 solar wind ingester (Bz, Bt, speed, density, temp)
+- dscovr-ingest:      DSCOVR L1 solar wind, live RTSW feed (Bz, Bt, speed, density, temp)
+- dscovr-archive-download/-ingest: NOAA NCEI DSCOVR archive, 2016-07-26 on, plasma
+  and magnetometer 1-minute averages, one bronze table per product
 
 %package contest
 Summary:        Contest and RBN data processing tools
@@ -171,6 +173,8 @@ install -p -m 0644 systemd/wspr-live-ingest.timer     %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-turbo.service             %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-turbo.timer               %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/dscovr-ingest.service          %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/dscovr-archive-refresh.service %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/dscovr-archive-refresh.timer   %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/dscovr-ingest.timer            %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/solar-live-update.service      %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/solar-live-update.timer        %{buildroot}%{_unitdir}/
@@ -267,6 +271,10 @@ fi
 %{_unitdir}/solar-xray-refresh.service
 %{_unitdir}/solar-xray-refresh.timer
 %{_bindir}/solar-download
+%{_bindir}/dscovr-archive-download
+%{_bindir}/dscovr-archive-ingest
+%{_unitdir}/dscovr-archive-refresh.service
+%{_unitdir}/dscovr-archive-refresh.timer
 %{_bindir}/dscovr-ingest
 %{_bindir}/solar-live-update
 %{_unitdir}/dscovr-ingest.service
@@ -283,13 +291,13 @@ if [ $1 -gt 1 ]; then
 fi
 
 %post solar
-%systemd_post dscovr-ingest.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer solar-xray-refresh.timer
+%systemd_post dscovr-ingest.timer dscovr-archive-refresh.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer solar-xray-refresh.timer
 
 %preun solar
-%systemd_preun dscovr-ingest.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer solar-xray-refresh.timer
+%systemd_preun dscovr-ingest.timer dscovr-archive-refresh.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer solar-xray-refresh.timer
 
 %postun solar
-%systemd_postun_with_restart dscovr-ingest.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer solar-xray-refresh.timer
+%systemd_postun_with_restart dscovr-ingest.timer dscovr-archive-refresh.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer solar-xray-refresh.timer
 
 %files contest
 %{_bindir}/contest-download
@@ -327,6 +335,17 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Thu Sep 24 2026 Bob <bob@ipa.home.arpa> - 4.4.0-1
+- dscovr-archive-download: mirror NOAA NCEI's DSCOVR archive (plasma f1m, magnetometer
+  m1m; one gzipped netCDF-3 file per day from 2016-07-26) unchanged, via the S3 listing
+  behind archive.data.noaa.gov. Incremental; fails if the mirror is incomplete (#35).
+- dscovr-archive-ingest: every record of every file into solar.dscovr_{f1m,m1m}_bronze;
+  missing_value -> NULL, flags as sent, a new non-flag variable refuses the file.
+  Watermarked in solar.ingest_log; batch spans files. Requires ionis-core >= 4.2.0.
+- internal/netcdf3: pure-Go netCDF classic reader, checked against scipy on real files.
+- dscovr-ingest: the live feed's null is stored as NULL, not 0 (7,049 speed and 6,433
+  density zeros had accumulated). Requires the ionis-core 4.2.0 Nullable columns.
+- dscovr-archive-refresh.timer (daily), enabled by the preset.
 * Wed Sep 23 2026 Bob <bob@ipa.home.arpa> - 4.3.2-1
 - solar-xray-download: a failed dated copy now fails the run. It was a WARN with exit 0,
   so the unit succeeded while the only X-ray history stopped growing; xray-archive/ had

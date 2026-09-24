@@ -69,26 +69,26 @@ type DscovrRecord struct {
 	// the feed. Stored per-row so a table named "dscovr" cannot silently imply
 	// DSCOVR for data that came from somewhere else.
 	Source      string
-	BzGSM       float32
-	Bt          float32
-	BxGSM       float32
-	ByGSM       float32
-	Speed       float32
-	Density     float32
-	Temperature float32
+	BzGSM       *float32
+	Bt          *float32
+	BxGSM       *float32
+	ByGSM       *float32
+	Speed       *float32
+	Density     *float32
+	Temperature *float32
 }
 
 // DscovrBatch holds columnar data for native ClickHouse insert.
 type DscovrBatch struct {
 	Date        *proto.ColDate32
 	Time        *proto.ColDateTime
-	BzGSM       *proto.ColFloat32
-	Bt          *proto.ColFloat32
-	BxGSM       *proto.ColFloat32
-	ByGSM       *proto.ColFloat32
-	Speed       *proto.ColFloat32
-	Density     *proto.ColFloat32
-	Temperature *proto.ColFloat32
+	BzGSM       *proto.ColNullable[float32]
+	Bt          *proto.ColNullable[float32]
+	BxGSM       *proto.ColNullable[float32]
+	ByGSM       *proto.ColNullable[float32]
+	Speed       *proto.ColNullable[float32]
+	Density     *proto.ColNullable[float32]
+	Temperature *proto.ColNullable[float32]
 	SourceFile  *proto.ColStr
 }
 
@@ -96,13 +96,13 @@ func NewDscovrBatch() *DscovrBatch {
 	return &DscovrBatch{
 		Date:        new(proto.ColDate32),
 		Time:        new(proto.ColDateTime),
-		BzGSM:       new(proto.ColFloat32),
-		Bt:          new(proto.ColFloat32),
-		BxGSM:       new(proto.ColFloat32),
-		ByGSM:       new(proto.ColFloat32),
-		Speed:       new(proto.ColFloat32),
-		Density:     new(proto.ColFloat32),
-		Temperature: new(proto.ColFloat32),
+		BzGSM:       proto.NewColNullable[float32](new(proto.ColFloat32)),
+		Bt:          proto.NewColNullable[float32](new(proto.ColFloat32)),
+		BxGSM:       proto.NewColNullable[float32](new(proto.ColFloat32)),
+		ByGSM:       proto.NewColNullable[float32](new(proto.ColFloat32)),
+		Speed:       proto.NewColNullable[float32](new(proto.ColFloat32)),
+		Density:     proto.NewColNullable[float32](new(proto.ColFloat32)),
+		Temperature: proto.NewColNullable[float32](new(proto.ColFloat32)),
 		SourceFile:  new(proto.ColStr),
 	}
 }
@@ -130,13 +130,13 @@ func (b *DscovrBatch) AddRow(rec *DscovrRecord) {
 	date := rec.Time.Truncate(24 * time.Hour)
 	b.Date.Append(date)
 	b.Time.Append(rec.Time)
-	b.BzGSM.Append(rec.BzGSM)
-	b.Bt.Append(rec.Bt)
-	b.BxGSM.Append(rec.BxGSM)
-	b.ByGSM.Append(rec.ByGSM)
-	b.Speed.Append(rec.Speed)
-	b.Density.Append(rec.Density)
-	b.Temperature.Append(rec.Temperature)
+	b.BzGSM.Append(nullable(rec.BzGSM))
+	b.Bt.Append(nullable(rec.Bt))
+	b.BxGSM.Append(nullable(rec.BxGSM))
+	b.ByGSM.Append(nullable(rec.ByGSM))
+	b.Speed.Append(nullable(rec.Speed))
+	b.Density.Append(nullable(rec.Density))
+	b.Temperature.Append(nullable(rec.Temperature))
 	src := rec.Source
 	if src == "" {
 		src = sourceTag
@@ -210,14 +210,15 @@ type rtswWind struct {
 	Temperature *float32 `json:"proton_temperature"`
 }
 
-// deref returns the pointed-to value, or 0 when the feed sent null. The column is
-// Float32 DEFAULT 0 and every prior row used the same convention, so this keeps
-// the existing contract rather than changing the table's meaning in a bugfix.
-func deref(f *float32) float32 {
+// nullable carries the feed's null through as NULL. It used to become 0 (deref, and a
+// Float32 DEFAULT 0 column), so a missing reading was stored as a measurement:
+// 7,049 speed and 6,433 density zeros by 2026-09-24. The column is Nullable(Float32)
+// from ionis-core 4.2.0 (IONIS-AI/ionis-apps#35).
+func nullable(f *float32) proto.Nullable[float32] {
 	if f == nil {
-		return 0
+		return proto.Null[float32]()
 	}
-	return *f
+	return proto.NewNullable(*f)
 }
 
 func parseMag(data []byte, records map[time.Time]*DscovrRecord) (int, error) {
@@ -254,10 +255,10 @@ func parseMag(data []byte, records map[time.Time]*DscovrRecord) (int, error) {
 			rec.Source = row.Source
 		}
 
-		rec.Bt = deref(row.Bt)
-		rec.BxGSM = deref(row.BxGSM)
-		rec.ByGSM = deref(row.ByGSM)
-		rec.BzGSM = deref(row.BzGSM)
+		rec.Bt = row.Bt
+		rec.BxGSM = row.BxGSM
+		rec.ByGSM = row.ByGSM
+		rec.BzGSM = row.BzGSM
 		count++
 	}
 
@@ -297,9 +298,9 @@ func parsePlasma(data []byte, records map[time.Time]*DscovrRecord) (int, error) 
 			rec.Source = row.Source
 		}
 
-		rec.Density = deref(row.Density)
-		rec.Speed = deref(row.Speed)
-		rec.Temperature = deref(row.Temperature)
+		rec.Density = row.Density
+		rec.Speed = row.Speed
+		rec.Temperature = row.Temperature
 		count++
 	}
 
@@ -400,36 +401,41 @@ func main() {
 	}
 	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i].Before(timestamps[j]) })
 
-	// Compute summary stats
+	// Compute summary stats over the readings that are present.
 	var sumBz, sumSpeed, sumDensity float64
+	var nBz, nSpeed, nDensity int
 	var minBz, maxBz float32 = 999, -999
 	var minSpeed, maxSpeed float32 = 99999, 0
 	for _, t := range timestamps {
 		r := records[t]
-		sumBz += float64(r.BzGSM)
-		sumSpeed += float64(r.Speed)
-		sumDensity += float64(r.Density)
-		if r.BzGSM < minBz {
-			minBz = r.BzGSM
+		if r.BzGSM != nil {
+			nBz++
+			sumBz += float64(*r.BzGSM)
+			minBz, maxBz = min(minBz, *r.BzGSM), max(maxBz, *r.BzGSM)
 		}
-		if r.BzGSM > maxBz {
-			maxBz = r.BzGSM
+		if r.Speed != nil {
+			nSpeed++
+			sumSpeed += float64(*r.Speed)
+			minSpeed, maxSpeed = min(minSpeed, *r.Speed), max(maxSpeed, *r.Speed)
 		}
-		if r.Speed < minSpeed {
-			minSpeed = r.Speed
-		}
-		if r.Speed > maxSpeed {
-			maxSpeed = r.Speed
+		if r.Density != nil {
+			nDensity++
+			sumDensity += float64(*r.Density)
 		}
 	}
+	avg := func(sum float64, n int) float64 {
+		if n == 0 {
+			return 0
+		}
+		return sum / float64(n)
+	}
 
-	n := float64(len(timestamps))
 	log.Printf("Date range: %s to %s",
 		timestamps[0].Format("2006-01-02 15:04"),
 		timestamps[len(timestamps)-1].Format("2006-01-02 15:04"))
-	log.Printf("Bz:      avg %.2f nT, range [%.2f, %.2f] nT", sumBz/n, minBz, maxBz)
-	log.Printf("Speed:   avg %.0f km/s, range [%.0f, %.0f] km/s", sumSpeed/n, minSpeed, maxSpeed)
-	log.Printf("Density: avg %.2f p/cm³", sumDensity/n)
+	log.Printf("Bz:      avg %.2f nT, range [%.2f, %.2f] nT (%d of %d present)", avg(sumBz, nBz), minBz, maxBz, nBz, len(timestamps))
+	log.Printf("Speed:   avg %.0f km/s, range [%.0f, %.0f] km/s (%d present)", avg(sumSpeed, nSpeed), minSpeed, maxSpeed, nSpeed)
+	log.Printf("Density: avg %.2f p/cm³ (%d present)", avg(sumDensity, nDensity), nDensity)
 
 	if *dryRun {
 		log.Printf("Dry run — %d rows parsed, skipping ClickHouse insert", len(timestamps))

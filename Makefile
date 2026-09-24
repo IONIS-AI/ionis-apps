@@ -51,7 +51,7 @@ DISTDIR      := dist
 # Note: Legacy tools (wspr-ingest, wspr-ingest-cpu, wspr-ingest-fast) removed
 #       due to clickhouse-go/v2 API incompatibility. Replaced by faster tools.
 WSPR_CMDS    := wspr-shredder wspr-turbo wspr-parquet-native wspr-download wspr-backfill wspr-live-download wspr-live-ingest
-SOLAR_CMDS   := solar-download dscovr-ingest \
+SOLAR_CMDS   := solar-download dscovr-ingest dscovr-archive-download dscovr-archive-ingest \
                 solar-kp-download solar-kp-ingest \
                 solar-sfi-download solar-sfi-ingest \
                 solar-ssn-download solar-ssn-ingest \
@@ -85,7 +85,8 @@ help:
 	@printf "Solar Tools:\n"
 	@printf "  solar-{kp,sfi,ssn,xray}-download / -ingest   one bronze table per source\n"
 	@printf "  solar-download       SWPC nowcast JSON for solar-live-update\n"
-	@printf "  dscovr-ingest        DSCOVR L1 solar wind ingester (Bz/speed/density)\n"
+	@printf "  dscovr-ingest        DSCOVR L1 solar wind, live RTSW feed\n"
+	@printf "  dscovr-archive-download / -ingest   DSCOVR NCEI archive 2016- -> solar.dscovr_{f1m,m1m}_bronze\n"
 	@printf "\n"
 	@printf "Contest Tools:\n"
 	@printf "  contest-download     CQ contest Cabrillo log downloader\n"

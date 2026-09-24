@@ -1,0 +1,18 @@
+[Unit]
+# Mirror NOAA NCEI's DSCOVR archive, then load new files into bronze. One unit, like the
+# solar-*-refresh units: an ingest only runs after a complete mirror, and a failed
+# download leaves the previous mirror untouched and fails the unit.
+Description=DSCOVR definitive archive from NOAA NCEI (2016-07-26-, ~3 months behind)
+Documentation=https://github.com/IONIS-AI/ionis-apps
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ionis-ingest
+Group=ionis-data
+EnvironmentFile=-/etc/ionis-apps/paths.conf
+ExecStart=/usr/bin/dscovr-archive-download
+ExecStart=/usr/bin/dscovr-archive-ingest --host ${IONIS_CH_HOST}
+Restart=on-failure
+RestartSec=30min
