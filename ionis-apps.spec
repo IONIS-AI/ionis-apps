@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.5.0
+Version:        4.5.1
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -339,6 +339,12 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Fri Sep 25 2026 Bob <bob@ipa.home.arpa> - 4.5.1-1
+- dscovr-archive-download: create every directory level (mirror root, product, year,
+  month) group-writable with setgid. Only month and year were, so dscovr/f1m and
+  dscovr/m1m came out 0755 and a new year would have failed (#35).
+- solar-download: stop fetching goes_xray_7day.json; nothing reads it since the
+  GOES X-ray archive replaced the 7-day window (#36).
 * Fri Sep 25 2026 Bob <bob@ipa.home.arpa> - 4.5.0-1
 - goes-xrs-download / goes-xrs-ingest: GOES X-ray from NOAA NCEI's 1-minute science
   archive (xrsf-l2-avg1m_science), GOES-16/17/18/19 from 2017-02-07: one source, one
