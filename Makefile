@@ -55,7 +55,7 @@ SOLAR_CMDS   := solar-download dscovr-ingest dscovr-archive-download dscovr-arch
                 solar-kp-download solar-kp-ingest \
                 solar-sfi-download solar-sfi-ingest \
                 solar-ssn-download solar-ssn-ingest \
-                solar-xray-download solar-xray-ingest
+                goes-xrs-download goes-xrs-ingest
 CONTEST_CMDS := contest-download rbn-download rbn-ingest contest-ingest
 PSKR_CMDS    := pskr-collector pskr-ingest
 UTIL_CMDS    := db-validate
@@ -83,7 +83,8 @@ help:
 	@printf "  wspr-download        WSPR archive downloader\n"
 	@printf "\n"
 	@printf "Solar Tools:\n"
-	@printf "  solar-{kp,sfi,ssn,xray}-download / -ingest   one bronze table per source\n"
+	@printf "  solar-{kp,sfi,ssn}-download / -ingest   one bronze table per source\n"
+	@printf "  goes-xrs-download / -ingest    GOES X-ray 1-min archive (NCEI, 2017-) -> solar.goes_xrs_1m_bronze\n"
 	@printf "  solar-download       SWPC nowcast JSON for solar-live-update\n"
 	@printf "  dscovr-ingest        DSCOVR L1 solar wind, live RTSW feed\n"
 	@printf "  dscovr-archive-download / -ingest   DSCOVR NCEI archive 2016- -> solar.dscovr_{f1m,m1m}_bronze\n"
