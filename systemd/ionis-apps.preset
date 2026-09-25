@@ -14,7 +14,7 @@ enable solar-live-update.timer
 enable solar-kp-refresh.timer
 enable solar-sfi-refresh.timer
 enable solar-ssn-refresh.timer
-enable solar-xray-refresh.timer
+enable goes-xrs-refresh.timer
 enable wspr-live-download.timer
 enable wspr-live-ingest.timer
 enable wspr-turbo.timer

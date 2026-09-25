@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.4.0
+Version:        4.5.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -74,13 +74,17 @@ All ingestion tools use ch-go native protocol with LZ4 compression.
 %package solar
 Summary:        Solar flux data processing tools
 Requires:       %{name} = %{version}-%{release}
+# goes-xrs-ingest reads NCEI's netCDF-4 files with Unidata's ncdump (EPEL). Nothing links it.
+Requires:       netcdf
 Obsoletes:      ki7mt-ai-lab-apps-solar < 3.0.0
 Provides:       ki7mt-ai-lab-apps-solar = %{version}-%{release}
 
 %description solar
 Solar and geomagnetic data processing applications:
-- solar-{kp,sfi,ssn,xray}-download/-ingest: one bronze table per source, each
-  from its definitive archive, run by the solar-*-refresh timers
+- solar-{kp,sfi,ssn}-download/-ingest: one bronze table per source, each from its
+  definitive archive, run by the solar-*-refresh timers
+- goes-xrs-download/-ingest: GOES X-ray 1-minute archive from NOAA NCEI, every
+  GOES-R satellite from 2017, read with ncdump (netcdf, EPEL)
 - solar-download:     SWPC nowcast JSON, the inputs of solar-live-update
 - solar-live-update:  Now-Casting live conditions updater (15-min timer)
 - dscovr-ingest:      DSCOVR L1 solar wind, live RTSW feed (Bz, Bt, speed, density, temp)
@@ -162,8 +166,8 @@ install -p -m 0644 systemd/solar-sfi-refresh.service %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/solar-sfi-refresh.timer   %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/solar-ssn-refresh.service %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/solar-ssn-refresh.timer   %{buildroot}%{_unitdir}/
-install -p -m 0644 systemd/solar-xray-refresh.service %{buildroot}%{_unitdir}/
-install -p -m 0644 systemd/solar-xray-refresh.timer   %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/goes-xrs-refresh.service   %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/goes-xrs-refresh.timer     %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-download.service       %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-download.timer         %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/wspr-live-download.service %{buildroot}%{_unitdir}/
@@ -260,16 +264,16 @@ fi
 %{_bindir}/solar-sfi-ingest
 %{_bindir}/solar-ssn-download
 %{_bindir}/solar-ssn-ingest
-%{_bindir}/solar-xray-download
-%{_bindir}/solar-xray-ingest
+%{_bindir}/goes-xrs-download
+%{_bindir}/goes-xrs-ingest
 %{_unitdir}/solar-kp-refresh.service
 %{_unitdir}/solar-kp-refresh.timer
 %{_unitdir}/solar-sfi-refresh.service
 %{_unitdir}/solar-sfi-refresh.timer
 %{_unitdir}/solar-ssn-refresh.service
 %{_unitdir}/solar-ssn-refresh.timer
-%{_unitdir}/solar-xray-refresh.service
-%{_unitdir}/solar-xray-refresh.timer
+%{_unitdir}/goes-xrs-refresh.service
+%{_unitdir}/goes-xrs-refresh.timer
 %{_bindir}/solar-download
 %{_bindir}/dscovr-archive-download
 %{_bindir}/dscovr-archive-ingest
@@ -287,17 +291,17 @@ fi
 # first, while the unit files still exist, or the enable links are left dangling.
 %pre solar
 if [ $1 -gt 1 ]; then
-    systemctl --no-reload disable --now solar-backfill.timer solar-history-load.timer >/dev/null 2>&1 || :
+    systemctl --no-reload disable --now solar-backfill.timer solar-history-load.timer solar-xray-refresh.timer >/dev/null 2>&1 || :
 fi
 
 %post solar
-%systemd_post dscovr-ingest.timer dscovr-archive-refresh.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer solar-xray-refresh.timer
+%systemd_post dscovr-ingest.timer dscovr-archive-refresh.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer goes-xrs-refresh.timer
 
 %preun solar
-%systemd_preun dscovr-ingest.timer dscovr-archive-refresh.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer solar-xray-refresh.timer
+%systemd_preun dscovr-ingest.timer dscovr-archive-refresh.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer goes-xrs-refresh.timer
 
 %postun solar
-%systemd_postun_with_restart dscovr-ingest.timer dscovr-archive-refresh.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer solar-xray-refresh.timer
+%systemd_postun_with_restart dscovr-ingest.timer dscovr-archive-refresh.timer solar-live-update.timer solar-kp-refresh.timer solar-sfi-refresh.timer solar-ssn-refresh.timer goes-xrs-refresh.timer
 
 %files contest
 %{_bindir}/contest-download
@@ -335,6 +339,14 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Fri Sep 25 2026 Bob <bob@ipa.home.arpa> - 4.5.0-1
+- goes-xrs-download / goes-xrs-ingest: GOES X-ray from NOAA NCEI's 1-minute science
+  archive (xrsf-l2-avg1m_science), GOES-16/17/18/19 from 2017-02-07: one source, one
+  download, one ingest, into solar.goes_xrs_1m_bronze. Files are netCDF-4, read with
+  Unidata's ncdump; nothing is linked. Requires: netcdf (EPEL). Refs #36.
+- Retire solar-xray-download / solar-xray-ingest and solar-xray-refresh: they polled
+  SWPC's 7-day window, so solar.xray_bronze never held more than a week. %pre disables
+  the old timer on upgrade.
 * Thu Sep 24 2026 Bob <bob@ipa.home.arpa> - 4.4.0-1
 - dscovr-archive-download: mirror NOAA NCEI's DSCOVR archive (plasma f1m, magnetometer
   m1m; one gzipped netCDF-3 file per day from 2016-07-26) unchanged, via the S3 listing

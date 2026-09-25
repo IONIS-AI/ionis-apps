@@ -1,0 +1,12 @@
+[Unit]
+Description=GOES X-ray 1-minute archive from NOAA NCEI (2017-, all GOES-R satellites)
+
+[Timer]
+# NCEI publishes each day's file the next day; daily picks it up, and a missed run loses
+# nothing -- the next one fetches whatever is new.
+OnCalendar=05:20
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target

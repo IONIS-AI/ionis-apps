@@ -45,7 +45,7 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 | `solar-kp-download` / `solar-kp-ingest` | Kp/ap, GFZ definitive archive (1932-) → `solar.kp_bronze` |
 | `solar-sfi-download` / `solar-sfi-ingest` | F10.7, Penticton (2004-) → `solar.sfi_bronze` |
 | `solar-ssn-download` / `solar-ssn-ingest` | Sunspot number, SIDC (1818-) → `solar.ssn_bronze` |
-| `solar-xray-download` / `solar-xray-ingest` | GOES X-ray, SWPC 7-day → `solar.xray_bronze` |
+| `goes-xrs-download` / `goes-xrs-ingest` | GOES X-ray 1-min, NCEI archive 2017– → `solar.goes_xrs_1m_bronze` |
 | `solar-download` | SWPC nowcast JSON, read by `solar-live-update` |
 
 ### Utility Tools

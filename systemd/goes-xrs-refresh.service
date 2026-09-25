@@ -1,0 +1,18 @@
+[Unit]
+# GOES X-ray (XRS) 1-minute archive from NOAA NCEI: one download, one ingest. The ingest
+# only runs after a complete mirror; a failed download fails the unit and leaves the
+# previous mirror untouched.
+Description=GOES X-ray 1-minute archive from NOAA NCEI (2017-, all GOES-R satellites)
+Documentation=https://github.com/IONIS-AI/ionis-apps
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ionis-ingest
+Group=ionis-data
+EnvironmentFile=-/etc/ionis-apps/paths.conf
+ExecStart=/usr/bin/goes-xrs-download
+ExecStart=/usr/bin/goes-xrs-ingest --host ${IONIS_CH_HOST}
+Restart=on-failure
+RestartSec=30min
