@@ -195,15 +195,8 @@ func fetch(c *http.Client, base string, o object, dst string) error {
 	if !bytes.HasPrefix(b, []byte{0x1f, 0x8b}) {
 		return fmt.Errorf("not gzip -- refusing to store %s", path.Base(o.Key))
 	}
-	dir := filepath.Dir(dst)
-	if err := os.MkdirAll(dir, 0o775|os.ModeSetgid); err != nil {
+	if err := mirrorDirs(dst); err != nil {
 		return err
-	}
-	// MkdirAll is subject to umask; make the month and year directories group-writable
-	// so any account in the data group can add to the mirror. Not fatal: a directory
-	// another account owns is already whatever its owner made it.
-	for d, i := dir, 0; i < 2; d, i = filepath.Dir(d), i+1 {
-		_ = os.Chmod(d, 0o775|os.ModeSetgid)
 	}
 	tmp := dst + ".partial"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
@@ -215,6 +208,24 @@ func fetch(c *http.Client, base string, o object, dst string) error {
 // get fetches u, retrying a server error (5xx) or a transport error up to four times
 // with backoff. NCEI's proxy returns an occasional HTTP 500 for a file that is fine a
 // moment later: one of 7,289 on the first full mirror (2026-09-24).
+// mirrorDirs creates every level the service may need for dst -- mirror root, product,
+// year, month -- group-writable with setgid, so a new product or year never needs a
+// hand-made directory. It used to set only month and year: dscovr/f1m and dscovr/m1m
+// came out 0755 and the first new year would have failed (#35). MkdirAll is subject to
+// umask, hence the chmod; not fatal on a directory another account owns.
+func mirrorDirs(dst string) error {
+	month := filepath.Dir(dst)
+	year := filepath.Dir(month)
+	prodDir := filepath.Dir(year)
+	for _, d := range []string{filepath.Dir(prodDir), prodDir, year, month} {
+		if err := os.MkdirAll(d, 0o775|os.ModeSetgid); err != nil {
+			return err
+		}
+		_ = os.Chmod(d, 0o775|os.ModeSetgid)
+	}
+	return nil
+}
+
 func get(c *http.Client, u string) ([]byte, error) {
 	var last error
 	for attempt, wait := 0, 2*time.Second; attempt < 5; attempt, wait = attempt+1, wait*2 {

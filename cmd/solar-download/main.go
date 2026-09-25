@@ -88,12 +88,6 @@ var sources = []DataSource{
 		Filename: "goes_xray_flux.json",
 		Desc:     "GOES X-ray flux (6-hour rolling window)",
 	},
-	{
-		Name:     "goes_xray_7day",
-		URL:      "https://services.swpc.noaa.gov/json/goes/primary/xrays-7-day.json",
-		Filename: "goes_xray_7day.json",
-		Desc:     "GOES X-ray flux (7-day history for training)",
-	},
 }
 
 func downloadFile(url, destPath string, timeout time.Duration) error {
