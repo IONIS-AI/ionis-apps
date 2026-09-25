@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.5.2
+Version:        4.6.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -339,6 +339,13 @@ fi
 %systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
 
 %changelog
+* Fri Sep 25 2026 Bob <bob@ipa.home.arpa> - 4.6.0-1
+- solar-kp-ingest, solar-ssn-ingest: every data line a row with every source column,
+  line number and raw text; -1 is NULL (Kp used to SKIP -1 lines); an unreadable line
+  is kept with parse_error. Loaded through internal/stagedload (staging, count checked
+  against the file, EXCHANGE TABLES); the success line reports the table's count.
+  Requires ionis-core >= 4.4.0 (new kp_bronze / ssn_bronze schemas).
+- internal/stagedload: the staged-replace pattern from #46 as a shared package.
 * Fri Sep 25 2026 Bob <bob@ipa.home.arpa> - 4.5.2-1
 - solar-sfi-ingest: every data line of Penticton's file is a row -- the 49 observations
   that share a rounded fluxtime are no longer collapsed, and fluxjulian is stored. Loads
