@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.6.0
+Version:        4.7.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -114,7 +114,8 @@ Requires:       %{name} = %{version}-%{release}
 
 %description pskr
 PSK Reporter data collection and ingestion tools:
-- pskr-collector:  MQTT subscriber for live FT8/FT4/CW/WSPR spots (~300 spots/sec)
+- pskr-collector:  MQTT subscriber (legacy: HF-only, rewrites fields; being replaced)
+- pskr-capture:    MQTT capture of every message exactly as received (TLS, events recorded)
                    Writes gzip JSONL to disk with hourly rotation.
                    Forward-only collection from mqtt.pskreporter.info.
 - pskr-ingest:     Incremental JSONL→ClickHouse loader with watermark tracking.
@@ -187,6 +188,7 @@ install -p -m 0644 systemd/rbn-download.timer             %{buildroot}%{_unitdir
 install -p -m 0644 systemd/rbn-ingest.service             %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/rbn-ingest.timer               %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/pskr-collector.service         %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/pskr-capture.service           %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/pskr-ingest.service            %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir}/
 
@@ -324,21 +326,30 @@ fi
 
 %files pskr
 %{_bindir}/pskr-collector
+%{_bindir}/pskr-capture
 %{_bindir}/pskr-ingest
 %{_unitdir}/pskr-collector.service
+%{_unitdir}/pskr-capture.service
 %{_unitdir}/pskr-ingest.service
 %{_unitdir}/pskr-ingest.timer
 
 %post pskr
-%systemd_post pskr-ingest.timer pskr-collector.service
+%systemd_post pskr-ingest.timer pskr-collector.service pskr-capture.service
 
 %preun pskr
-%systemd_preun pskr-ingest.timer pskr-collector.service
+%systemd_preun pskr-ingest.timer pskr-collector.service pskr-capture.service
 
 %postun pskr
-%systemd_postun_with_restart pskr-ingest.timer pskr-collector.service
+%systemd_postun_with_restart pskr-ingest.timer pskr-collector.service pskr-capture.service
 
 %changelog
+* Sat Sep 26 2026 Bob <bob@ipa.home.arpa> - 4.7.0-1
+- pskr-capture: records the PSK Reporter MQTT feed exactly as it arrives -- payload
+  bytes, receive time and topic per message; connect/loss/drop events in the file; no
+  filtering; TLS to :1884; hourly files written as .partial and renamed on clean close.
+  pskr-collector filtered non-HF spots, erased 8/10-character grids (28% of grid
+  values), kept 8 of 13 fields and turned a missing timestamp into 1970 (#37).
+- pskr-ingest: load spots-*.jsonl.gz only, so capture files are never read by it.
 * Fri Sep 25 2026 Bob <bob@ipa.home.arpa> - 4.6.0-1
 - solar-kp-ingest, solar-ssn-ingest: every data line a row with every source column,
   line number and raw text; -1 is NULL (Kp used to SKIP -1 lines); an unreadable line
