@@ -1,0 +1,11 @@
+[Unit]
+Description=PSK Reporter capture ingest, hourly
+
+[Timer]
+# pskr-capture closes each hour on its own start-time boundary; hourly picks up every
+# completed hour, and a missed run loses nothing (the watermark takes what is new).
+OnCalendar=*-*-* *:20:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
