@@ -20,7 +20,5 @@ enable wspr-live-ingest.timer
 enable wspr-turbo.timer
 enable rbn-download.timer
 enable rbn-ingest.timer
-enable pskr-ingest.timer
-enable pskr-collector.service
 enable pskr-capture.service
 enable pskr-capture-ingest.timer
