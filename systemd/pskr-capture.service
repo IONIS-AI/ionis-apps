@@ -1,0 +1,37 @@
+# pskr-capture.service -- the PSK Reporter MQTT feed, recorded exactly as it arrives.
+#
+# Writes $IONIS_PSKR_DATA_DIR/capture/YYYY/MM/DD/capture-HHMMSS.jsonl.gz: one line per
+# message with the payload's exact bytes, receive time and topic, plus event lines for
+# connect / connection loss / drops. No filtering. TLS to port 1884. Each hour is
+# written as .partial and renamed on a clean close. Replaces pskr-collector, which
+# filtered and rewrote the feed; both run side by side until the comparison is done.
+#
+# PSK Reporter created by Philip Gladstone, N1DQ. MQTT feed provided by Tom Sevart, M0LTE.
+
+[Unit]
+Description=PSK Reporter MQTT capture (faithful, every message as received)
+Documentation=https://pskreporter.info
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=-/etc/ionis-apps/paths.conf
+Type=simple
+User=ionis-ingest
+Group=ionis-data
+ExecStart=/usr/bin/pskr-capture --stats 60s
+Restart=on-failure
+RestartSec=30
+
+# Graceful shutdown: the writer drains, records a "stopped" event and renames the file.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/mnt/pskr-data
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

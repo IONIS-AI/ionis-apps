@@ -222,7 +222,10 @@ func discoverFiles(srcDir string) ([]string, error) {
 		if err != nil {
 			return nil
 		}
-		if !info.IsDir() && strings.HasSuffix(path, ".jsonl.gz") {
+		// spots-*.jsonl.gz ONLY: the old pskr-collector's files. pskr-capture writes
+		// capture-*.jsonl.gz under capture/ in the same tree, in a different format,
+		// loaded by its own ingester; this one must never pick those up.
+		if !info.IsDir() && strings.HasPrefix(filepath.Base(path), "spots-") && strings.HasSuffix(path, ".jsonl.gz") {
 			files = append(files, path)
 		}
 		return nil

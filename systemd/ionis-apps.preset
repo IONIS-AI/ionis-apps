@@ -22,3 +22,4 @@ enable rbn-download.timer
 enable rbn-ingest.timer
 enable pskr-ingest.timer
 enable pskr-collector.service
+enable pskr-capture.service
