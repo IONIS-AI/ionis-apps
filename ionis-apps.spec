@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.7.0
+Version:        4.8.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -116,6 +116,7 @@ Requires:       %{name} = %{version}-%{release}
 PSK Reporter data collection and ingestion tools:
 - pskr-collector:  MQTT subscriber (legacy: HF-only, rewrites fields; being replaced)
 - pskr-capture:    MQTT capture of every message exactly as received (TLS, events recorded)
+- pskr-capture-ingest: capture files into pskr.capture_bronze, every line a row
                    Writes gzip JSONL to disk with hourly rotation.
                    Forward-only collection from mqtt.pskreporter.info.
 - pskr-ingest:     Incremental JSONL→ClickHouse loader with watermark tracking.
@@ -189,6 +190,8 @@ install -p -m 0644 systemd/rbn-ingest.service             %{buildroot}%{_unitdir
 install -p -m 0644 systemd/rbn-ingest.timer               %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/pskr-collector.service         %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/pskr-capture.service           %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/pskr-capture-ingest.service    %{buildroot}%{_unitdir}/
+install -p -m 0644 systemd/pskr-capture-ingest.timer      %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/pskr-ingest.service            %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir}/
 
@@ -327,22 +330,33 @@ fi
 %files pskr
 %{_bindir}/pskr-collector
 %{_bindir}/pskr-capture
+%{_bindir}/pskr-capture-ingest
 %{_bindir}/pskr-ingest
 %{_unitdir}/pskr-collector.service
 %{_unitdir}/pskr-capture.service
+%{_unitdir}/pskr-capture-ingest.service
+%{_unitdir}/pskr-capture-ingest.timer
 %{_unitdir}/pskr-ingest.service
 %{_unitdir}/pskr-ingest.timer
 
 %post pskr
-%systemd_post pskr-ingest.timer pskr-collector.service pskr-capture.service
+%systemd_post pskr-ingest.timer pskr-collector.service pskr-capture.service pskr-capture-ingest.timer
 
 %preun pskr
-%systemd_preun pskr-ingest.timer pskr-collector.service pskr-capture.service
+%systemd_preun pskr-ingest.timer pskr-collector.service pskr-capture.service pskr-capture-ingest.timer
 
 %postun pskr
-%systemd_postun_with_restart pskr-ingest.timer pskr-collector.service pskr-capture.service
+%systemd_postun_with_restart pskr-ingest.timer pskr-collector.service pskr-capture.service pskr-capture-ingest.timer
 
 %changelog
+* Sat Sep 26 2026 Bob <bob@ipa.home.arpa> - 4.8.0-1
+- pskr-capture-ingest: pskr-capture's files into pskr.capture_bronze, one row per line
+  (message or event); every payload field its own column, any unknown field or
+  unexpected type kept in extra; a crashed hour (.partial untouched for 2 h) loaded up
+  to its cut, the cut line kept with parse_error; watermark pskr.capture_ingest_log.
+  Hourly timer. Requires ionis-core >= 4.5.0 (#37).
+- internal/watermark: LoadWatermarkTable / InsertLogEntriesTable for a watermark
+  table not named <db>.ingest_log.
 * Sat Sep 26 2026 Bob <bob@ipa.home.arpa> - 4.7.0-1
 - pskr-capture: records the PSK Reporter MQTT feed exactly as it arrives -- payload
   bytes, receive time and topic per message; connect/loss/drop events in the file; no

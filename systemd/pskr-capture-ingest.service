@@ -1,0 +1,12 @@
+[Unit]
+# Load completed pskr-capture hours into pskr.capture_bronze (every line a row).
+Description=PSK Reporter capture ingest (pskr-capture files -> pskr.capture_bronze)
+Documentation=https://github.com/IONIS-AI/ionis-apps
+After=network-online.target clickhouse-server.service
+
+[Service]
+Type=oneshot
+User=ionis-ingest
+Group=ionis-data
+EnvironmentFile=-/etc/ionis-apps/paths.conf
+ExecStart=/usr/bin/pskr-capture-ingest --host ${IONIS_CH_HOST}

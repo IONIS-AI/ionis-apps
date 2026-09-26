@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/ClickHouse/ch-go"
 	"github.com/ClickHouse/ch-go/proto"
@@ -35,6 +36,17 @@ type Entry struct {
 // LoadWatermark reads all previously loaded file paths from {db}.ingest_log.
 // Returns a map from file_path → Entry (with file_size and row_count).
 func LoadWatermark(ctx context.Context, host, db string) (map[string]Entry, error) {
+	return LoadWatermarkTable(ctx, host, db+".ingest_log")
+}
+
+// LoadWatermarkTable is LoadWatermark for a watermark table not named <db>.ingest_log
+// -- a source with two collections, like PSKR's filtered pskr.ingest_log and
+// pskr.capture_ingest_log, needs one each.
+func LoadWatermarkTable(ctx context.Context, host, table string) (map[string]Entry, error) {
+	db, _, ok := strings.Cut(table, ".")
+	if !ok {
+		return nil, fmt.Errorf("watermark table %q is not <db>.<table>", table)
+	}
 	conn, err := ch.Dial(ctx, ch.Options{
 		Address:  host,
 		Database: db,
@@ -49,7 +61,7 @@ func LoadWatermark(ctx context.Context, host, db string) (map[string]Entry, erro
 	colSize := new(proto.ColUInt64)
 	colRows := new(proto.ColUInt64)
 
-	query := fmt.Sprintf("SELECT file_path, file_size, row_count FROM %s.ingest_log FINAL", db)
+	query := fmt.Sprintf("SELECT file_path, file_size, row_count FROM %s FINAL", table)
 	err = conn.Do(ctx, ch.Query{
 		Body: query,
 		Result: proto.Results{
@@ -135,6 +147,12 @@ type LogEntry struct {
 // InsertLogEntryWithSkipped, contest only for now). One round trip per file was half
 // of what made a full contest reload latency-bound: 825K files, 825K watermark INSERTs.
 func InsertLogEntries(ctx context.Context, conn *ch.Client, db string, entries []LogEntry) error {
+	return InsertLogEntriesTable(ctx, conn, db+".ingest_log", entries)
+}
+
+// InsertLogEntriesTable is InsertLogEntries for a watermark table not named
+// <db>.ingest_log.
+func InsertLogEntriesTable(ctx context.Context, conn *ch.Client, table string, entries []LogEntry) error {
 	if len(entries) == 0 {
 		return nil
 	}
@@ -156,7 +174,7 @@ func InsertLogEntries(ctx context.Context, conn *ch.Client, db string, entries [
 		colHost.Append(hostname)
 	}
 
-	query := fmt.Sprintf("INSERT INTO %s.ingest_log (file_path, file_size, row_count, skipped_rows, elapsed_ms, hostname) VALUES", db)
+	query := fmt.Sprintf("INSERT INTO %s (file_path, file_size, row_count, skipped_rows, elapsed_ms, hostname) VALUES", table)
 	return conn.Do(ctx, ch.Query{
 		Body: query,
 		Input: proto.Input{
