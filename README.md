@@ -35,8 +35,10 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 
 | Command | Description |
 |---------|-------------|
-| `pskr-collector` | MQTT real-time spot collector → gzip JSONL (~250 spots/sec HF) |
-| `pskr-ingest` | Incremental JSONL→ClickHouse loader with watermark tracking |
+| `pskr-capture` | MQTT capture of every message exactly as received (TLS, connection events in the file) → hourly gzip JSONL |
+| `pskr-capture-ingest` | Capture files → `pskr.capture_bronze`, one row per line |
+
+`pskr-collector` and `pskr-ingest` were retired in 4.9.0. The collector's grid check erased valid grids; `pskr.bronze` is frozen at its last load (2026-09-26 15:24:47 UTC).
 
 ### Solar Tools
 
@@ -64,7 +66,7 @@ Command-line tools for ingesting and processing amateur radio propagation data f
 | RBN | 2.26B spots | `rbn-ingest` | 10.32 Mrps, 3m32s |
 | Contest Logs | 234M QSOs | `contest-ingest` | 258K rps, 12m37s |
 | Solar Kp | 277K rows | `solar-kp-ingest` | |
-| PSK Reporter | ~26M/day (live since Feb 2026) | `pskr-collector` | ~300 HF spots/sec |
+| PSK Reporter | ~40M/day, all bands (capture since 2026-09-26) | `pskr-capture-ingest` | hourly |
 
 ## Idempotent Pipeline (v3.0.5+)
 
@@ -75,7 +77,7 @@ Every data source follows a paired **download → ingest** pattern. Downloaders 
 | WSPR | `wspr-download` | `wspr-turbo` | `wspr.ingest_log` |
 | RBN | `rbn-download` | `rbn-ingest` | `rbn.ingest_log` |
 | Contest | `contest-download` | `contest-ingest` | `contest.ingest_log` |
-| PSKR | `pskr-collector` | `pskr-ingest` | `pskr.ingest_log` |
+| PSKR | `pskr-capture` | `pskr-capture-ingest` | `pskr.capture_ingest_log` |
 | Solar (per source) | `solar-{kp,sfi,ssn,xray}-download` | `solar-{kp,sfi,ssn,xray}-ingest` | — (run together by `solar-*-refresh.timer`) |
 
 ### Ingest Modes

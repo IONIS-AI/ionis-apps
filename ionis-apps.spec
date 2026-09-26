@@ -5,7 +5,7 @@
 %global goipath         github.com/IONIS-AI/ionis-apps
 
 Name:           ionis-apps
-Version:        4.8.0
+Version:        4.9.0
 Release:        1%{?dist}
 Summary:        High-performance WSPR/Solar data ingestion tools for ClickHouse
 
@@ -114,13 +114,10 @@ Requires:       %{name} = %{version}-%{release}
 
 %description pskr
 PSK Reporter data collection and ingestion tools:
-- pskr-collector:  MQTT subscriber (legacy: HF-only, rewrites fields; being replaced)
 - pskr-capture:    MQTT capture of every message exactly as received (TLS, events recorded)
 - pskr-capture-ingest: capture files into pskr.capture_bronze, every line a row
                    Writes gzip JSONL to disk with hourly rotation.
                    Forward-only collection from mqtt.pskreporter.info.
-- pskr-ingest:     Incremental JSONL→ClickHouse loader with watermark tracking.
-                   Uses pskr.ingest_log for safe cron-based loading.
 
 %prep
 %autosetup -n %{name}-%{version}
@@ -188,12 +185,9 @@ install -p -m 0644 systemd/rbn-download.service           %{buildroot}%{_unitdir
 install -p -m 0644 systemd/rbn-download.timer             %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/rbn-ingest.service             %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/rbn-ingest.timer               %{buildroot}%{_unitdir}/
-install -p -m 0644 systemd/pskr-collector.service         %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/pskr-capture.service           %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/pskr-capture-ingest.service    %{buildroot}%{_unitdir}/
 install -p -m 0644 systemd/pskr-capture-ingest.timer      %{buildroot}%{_unitdir}/
-install -p -m 0644 systemd/pskr-ingest.service            %{buildroot}%{_unitdir}/
-install -p -m 0644 systemd/pskr-ingest.timer              %{buildroot}%{_unitdir}/
 
 %files
 %config(noreplace) %{_sysconfdir}/%{name}/paths.conf
@@ -328,27 +322,36 @@ fi
 %systemd_postun_with_restart rbn-download.timer rbn-ingest.timer
 
 %files pskr
-%{_bindir}/pskr-collector
 %{_bindir}/pskr-capture
 %{_bindir}/pskr-capture-ingest
-%{_bindir}/pskr-ingest
-%{_unitdir}/pskr-collector.service
 %{_unitdir}/pskr-capture.service
 %{_unitdir}/pskr-capture-ingest.service
 %{_unitdir}/pskr-capture-ingest.timer
-%{_unitdir}/pskr-ingest.service
-%{_unitdir}/pskr-ingest.timer
 
 %post pskr
-%systemd_post pskr-ingest.timer pskr-collector.service pskr-capture.service pskr-capture-ingest.timer
+%systemd_post pskr-capture.service pskr-capture-ingest.timer
+# Retired in 4.9.0. On an upgrade this runs while the previous package's unit files are
+# still on disk (rpm removes them after this scriptlet), so the old collector and its
+# ingest timer are stopped and disabled before their files disappear, never left running
+# from a deleted unit.
+if [ $1 -gt 1 ]; then
+  systemctl disable --now pskr-collector.service pskr-ingest.timer >/dev/null 2>&1 || :
+fi
 
 %preun pskr
-%systemd_preun pskr-ingest.timer pskr-collector.service pskr-capture.service pskr-capture-ingest.timer
+%systemd_preun pskr-capture.service pskr-capture-ingest.timer
 
 %postun pskr
-%systemd_postun_with_restart pskr-ingest.timer pskr-collector.service pskr-capture.service pskr-capture-ingest.timer
+%systemd_postun_with_restart pskr-capture.service pskr-capture-ingest.timer
 
 %changelog
+* Sat Sep 26 2026 Bob <bob@ipa.home.arpa> - 4.9.0-1
+- Retire pskr-collector and pskr-ingest: binaries, units, presets and build targets
+  removed. The collector's grid regex erased valid grids on 6.75 B rows over seven
+  months; pskr-capture replaced it (4.7.0). Both were stopped and disabled on
+  2026-09-26 at 15:25 UTC after exact parity on four windows; the last spots file was
+  loaded and pskr.bronze is frozen at 7,246,715,981 rows (#37). An upgrade stops and
+  disables both before their unit files are removed. Source stays in git history.
 * Sat Sep 26 2026 Bob <bob@ipa.home.arpa> - 4.8.0-1
 - pskr-capture-ingest: pskr-capture's files into pskr.capture_bronze, one row per line
   (message or event); every payload field its own column, any unknown field or

@@ -57,7 +57,7 @@ SOLAR_CMDS   := solar-download dscovr-ingest dscovr-archive-download dscovr-arch
                 solar-ssn-download solar-ssn-ingest \
                 goes-xrs-download goes-xrs-ingest
 CONTEST_CMDS := contest-download rbn-download rbn-ingest contest-ingest
-PSKR_CMDS    := pskr-collector pskr-capture pskr-capture-ingest pskr-ingest
+PSKR_CMDS    := pskr-capture pskr-capture-ingest
 UTIL_CMDS    := db-validate
 ALL_CMDS     := $(WSPR_CMDS) $(SOLAR_CMDS) $(CONTEST_CMDS) $(PSKR_CMDS) $(UTIL_CMDS)
 
@@ -96,10 +96,8 @@ help:
 	@printf "  contest-ingest       Cabrillo log→ClickHouse ingester\n"
 	@printf "\n"
 	@printf "PSK Reporter Tools:\n"
-	@printf "  pskr-collector       MQTT spot collector (legacy: filters and rewrites)\n"
 	@printf "  pskr-capture         MQTT capture, every message exactly as received\n"
 	@printf "  pskr-capture-ingest  capture files -> pskr.capture_bronze (every line a row)\n"
-	@printf "  pskr-ingest          JSONL→ClickHouse incremental ingester\n"
 	@printf "\n"
 	@printf "Utility Tools:\n"
 	@printf "  db-validate          Validate ClickHouse table row counts\n"
